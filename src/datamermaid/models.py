@@ -29,9 +29,15 @@ API_FIELD = "api_field"
 CONVERTER = "converter"
 
 
-def parse_datetime(value: Any) -> datetime:
-    """Parse an ISO 8601 timestamp as returned by the API."""
+def parse_datetime(value: Any) -> datetime | None:
+    """Parse an ISO 8601 timestamp as returned by the API.
 
+    ``None`` passes straight through, so an explicit JSON null yields a null
+    timestamp instead of an unparseable value.
+    """
+
+    if value is None:
+        return None
     if isinstance(value, datetime):
         return value
     if not isinstance(value, str):
@@ -61,6 +67,19 @@ def _mapping_tuple(value: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(dict(item) for item in value)
 
 
+def _model_tuple(model: type[M]) -> Callable[[Any], tuple[M, ...]]:
+    """Build a converter turning a JSON array into a tuple of ``model``."""
+
+    def convert(value: Any) -> tuple[M, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str) or not isinstance(value, Sequence):
+            raise TypeError("expected a sequence of objects")
+        return tuple(model.from_api(item) for item in value)
+
+    return convert
+
+
 def _api_meta(
     api_field: str | None = None, converter: Callable[[Any], Any] | None = None
 ) -> dict[str, Any]:
@@ -85,6 +104,8 @@ class APIModel:
         Keys the model does not declare are preserved in :attr:`extra`.  A value
         that fails conversion is left in :attr:`extra` under its original key and
         the declared field keeps its default, so nothing is silently dropped.
+        Converters also run for explicit JSON nulls, so a null collection becomes
+        an empty tuple rather than ``None``.
         """
 
         if not isinstance(data, Mapping):
@@ -100,7 +121,7 @@ class APIModel:
                 continue
             value = payload[key]
             converter = model_field.metadata.get(CONVERTER)
-            if converter is not None and value is not None:
+            if converter is not None:
                 try:
                     value = converter(value)
                 except (TypeError, ValueError):
@@ -147,10 +168,7 @@ class Me(APIModel):
     created_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
     updated_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
     projects: tuple[ProjectMembership, ...] = field(
-        default=(),
-        metadata=_api_meta(
-            converter=lambda value: tuple(ProjectMembership.from_api(item) for item in value)
-        ),
+        default=(), metadata=_api_meta(converter=_model_tuple(ProjectMembership))
     )
 
 

@@ -111,3 +111,66 @@ def test_to_df_over_pages(client):
     assert isinstance(frame, pandas.DataFrame)
     assert len(frame) == 2
     assert list(frame["name"]) == ["Project 1", "Project 2"]
+
+
+@respx.mock
+def test_foreign_next_links_are_not_followed(client):
+    """A `next` link on another host must never receive the credentials."""
+
+    second = respx.get(f"{BASE_URL}projects/", params={"limit": "1", "page": "2"}).mock(
+        return_value=httpx.Response(200, json=page([project_payload(2)], count=2))
+    )
+    respx.get(f"{BASE_URL}projects/", params={"limit": "1"}).mock(
+        return_value=httpx.Response(
+            200,
+            json=page(
+                [project_payload(1)],
+                next_url="https://evil.example/steal/?limit=1&page=2",
+                count=2,
+            ),
+        )
+    )
+    evil = respx.get("https://evil.example/steal/").mock(
+        return_value=httpx.Response(200, json=page([]))
+    )
+
+    names = [project.name for project in client.projects.list(limit=1)]
+    assert names == ["Project 1", "Project 2"]
+    assert evil.call_count == 0
+    assert second.call_count == 1
+
+
+@respx.mock
+def test_relative_next_links_are_followed(client):
+    second = respx.get(f"{BASE_URL}projects/", params={"page": "2"}).mock(
+        return_value=httpx.Response(200, json=page([project_payload(2)], count=2))
+    )
+    respx.get(f"{BASE_URL}projects/").mock(
+        return_value=httpx.Response(
+            200, json=page([project_payload(1)], next_url="projects/?page=2", count=2)
+        )
+    )
+    assert len(list(client.projects.list())) == 2
+    assert second.call_count == 1
+
+
+@respx.mock
+def test_ids_are_percent_encoded_into_the_path(client):
+    me = respx.get(f"{BASE_URL}me/").mock(return_value=httpx.Response(200, json={"id": "profile"}))
+    traversal = respx.get(f"{BASE_URL}projects/..%2Fme/").mock(
+        return_value=httpx.Response(404, json={"detail": "Not found."})
+    )
+
+    with pytest.raises(NotFoundError):
+        client.projects.get("../me")
+    assert me.call_count == 0
+    assert traversal.call_count == 1
+
+
+@respx.mock
+def test_ids_cannot_inject_query_parameters(client):
+    route = respx.get(f"{BASE_URL}projects/abc%3Fshowall=true/").mock(
+        return_value=httpx.Response(200, json=project_payload(1))
+    )
+    client.projects.get("abc?showall=true")
+    assert "showall" not in route.calls.last.request.url.params

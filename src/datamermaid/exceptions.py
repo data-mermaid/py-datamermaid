@@ -7,6 +7,8 @@ are mapped to dedicated subclasses by :func:`raise_for_status`.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -90,15 +92,31 @@ def _detail(body: Any) -> str | None:
 
 
 def parse_retry_after(value: str | None) -> float | None:
-    """Parse a ``Retry-After`` header value expressed in seconds."""
+    """Parse a ``Retry-After`` header into a delay in seconds.
+
+    Both forms allowed by RFC 9110 are understood: delta-seconds and an HTTP
+    date, which is converted into the seconds remaining from now.  Anything
+    unparseable (or already in the past) yields ``None``.
+    """
 
     if not value:
         return None
+    text = value.strip()
     try:
-        seconds = float(value.strip())
+        seconds = float(text)
     except ValueError:
+        pass
+    else:
+        return seconds if seconds >= 0 else None
+
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
         return None
-    return seconds if seconds >= 0 else None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    delay = (when - datetime.now(timezone.utc)).total_seconds()
+    return max(delay, 0.0)
 
 
 def raise_for_status(response: httpx.Response) -> None:

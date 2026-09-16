@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from urllib.parse import parse_qsl, quote, urlsplit
 
 from ..models import APIModel
 from ..pagination import Page, PaginatedList
@@ -35,7 +36,13 @@ class Resource(Generic[M]):
         return f"{type(self).__name__}(path={self.path!r})"
 
     def _url(self, *parts: str) -> str:
-        suffix = "".join(part.strip("/") + "/" for part in parts)
+        """Build an endpoint URL, percent-encoding each path segment.
+
+        Encoding keeps a stray ``/``, ``?`` or ``..`` in an id from redirecting
+        the request to a different endpoint.
+        """
+
+        suffix = "".join(quote(part.strip("/"), safe="") + "/" for part in parts)
         return f"{self.path}{suffix}"
 
     def _parse(self, data: Any) -> M:
@@ -54,6 +61,25 @@ class Resource(Generic[M]):
             count=data.get("count"),
         )
 
+    def _next_request(self, first_url: str, next_url: str) -> tuple[str, dict[str, Any] | None]:
+        """Resolve a ``next`` link into a request the client may safely make.
+
+        A link on the API's own host is followed as-is.  A link pointing
+        anywhere else contributes only its query parameters, so credentials are
+        never sent to a host the caller did not configure.
+        """
+
+        parsed = urlsplit(next_url)
+        if not parsed.scheme and not parsed.netloc:
+            return next_url, None
+        base = urlsplit(self._client.base_url)
+        if (parsed.scheme.lower(), parsed.netloc.lower()) == (
+            base.scheme.lower(),
+            base.netloc.lower(),
+        ):
+            return next_url, None
+        return first_url, dict(parse_qsl(parsed.query)) or None
+
     def _list(
         self,
         url: str | None = None,
@@ -69,7 +95,8 @@ class Resource(Generic[M]):
                 data = self._client.request_json("GET", first_url, params=query or None)
             else:
                 # `next` already carries the pagination and filter parameters.
-                data = self._client.request_json("GET", next_url)
+                page_url, page_params = self._next_request(first_url, next_url)
+                data = self._client.request_json("GET", page_url, params=page_params)
             return self._page(data)
 
         return PaginatedList(fetch)

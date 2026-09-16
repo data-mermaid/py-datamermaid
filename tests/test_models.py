@@ -44,10 +44,18 @@ def test_unparseable_values_are_preserved_in_extra():
     assert project.extra["created_on"] == "not a date"
 
 
-def test_null_values_skip_conversion():
+def test_null_collections_become_empty_tuples():
     project = Project.from_api(project_payload(created_on=None, countries=None))
     assert project.created_on is None
-    assert project.countries is None
+    assert project.countries == ()
+    assert "countries" not in project.extra
+    assert ", ".join(project.countries) == ""
+
+
+def test_null_nested_collection_becomes_an_empty_tuple():
+    me = Me.from_api({"id": "abc", "projects": None})
+    assert me.projects == ()
+    assert len(me.projects) == 0
 
 
 def test_models_are_frozen():

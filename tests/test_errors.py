@@ -81,6 +81,23 @@ def test_rate_limit_error_exposes_retry_after():
     assert excinfo.value.retry_after == 12.0
 
 
+def test_retry_after_accepts_an_http_date():
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+
+    from datamermaid.exceptions import parse_retry_after
+
+    when = datetime.now(timezone.utc) + timedelta(seconds=30)
+    delay = parse_retry_after(format_datetime(when, usegmt=True))
+    assert delay is not None
+    assert 25 <= delay <= 31
+    # A date in the past means "retry now", not "unknown".
+    past = format_datetime(datetime.now(timezone.utc) - timedelta(seconds=30), usegmt=True)
+    assert parse_retry_after(past) == 0.0
+    assert parse_retry_after("not a date") is None
+    assert parse_retry_after(None) is None
+
+
 @respx.mock
 def test_transport_errors_are_wrapped_and_retried(client):
     route = respx.get(f"{BASE_URL}me/").mock(side_effect=httpx.ConnectError("boom"))

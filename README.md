@@ -128,4 +128,4 @@ See [CLAUDE.md](CLAUDE.md) for build and test commands.
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
