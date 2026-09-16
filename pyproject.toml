@@ -1,0 +1,80 @@
+[project]
+name = "datamermaid"
+version = "0.1.0"
+description = "Python SDK for the MERMAID coral reef monitoring API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "MERMAID" }]
+keywords = ["mermaid", "coral", "reef", "api", "sdk"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0"]
+
+[project.urls]
+Homepage = "https://datamermaid.org/"
+Repository = "https://github.com/data-mermaid/py-datamermaid"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/datamermaid"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF", "ANN"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_optional = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+# pandas is an optional extra and its stubs pull in numpy's, which mypy cannot
+# parse under `python_version = "3.10"`.  The SDK only touches pandas behind
+# `TYPE_CHECKING`, so skipping it costs nothing.
+[[tool.mypy.overrides]]
+module = ["pandas.*"]
+follow_imports = "skip"
+ignore_missing_imports = true

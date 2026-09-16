@@ -1,0 +1,48 @@
+"""Python SDK for the MERMAID coral reef monitoring API.
+
+Quickstart:
+    >>> from datamermaid import MermaidClient
+    >>> with MermaidClient(api_key="mmd_abc.def") as client:  # doctest: +SKIP
+    ...     print(client.me().full_name)
+    ...     projects = client.projects.list()
+"""
+
+from __future__ import annotations
+
+from ._version import __version__
+from .auth import AnonymousAuth, APIKeyAuth, Auth
+from .client import BASE_URL_ENV_VAR, DEFAULT_BASE_URL, DEV_BASE_URL, MermaidClient
+from .exceptions import (
+    AuthenticationError,
+    MermaidAPIError,
+    MermaidConnectionError,
+    MermaidError,
+    NotFoundError,
+    RateLimitError,
+    ServerError,
+)
+from .models import APIModel, Me, Project, ProjectMembership
+from .pagination import PaginatedList
+
+__all__ = [
+    "BASE_URL_ENV_VAR",
+    "DEFAULT_BASE_URL",
+    "DEV_BASE_URL",
+    "APIKeyAuth",
+    "APIModel",
+    "AnonymousAuth",
+    "Auth",
+    "AuthenticationError",
+    "Me",
+    "MermaidAPIError",
+    "MermaidClient",
+    "MermaidConnectionError",
+    "MermaidError",
+    "NotFoundError",
+    "PaginatedList",
+    "Project",
+    "ProjectMembership",
+    "RateLimitError",
+    "ServerError",
+    "__version__",
+]
