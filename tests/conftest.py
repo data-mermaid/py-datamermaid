@@ -2,19 +2,137 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import socket
+import time
+
 import pytest
 
 from datamermaid import MermaidClient
+from datamermaid.auth.config import DEFAULT_AUTH0_DOMAIN
 
 BASE_URL = "https://api.datamermaid.org/v1/"
+TOKEN_URL = f"https://{DEFAULT_AUTH0_DOMAIN}/oauth/token"
+DEVICE_CODE_URL = f"https://{DEFAULT_AUTH0_DOMAIN}/oauth/device/code"
+AUTHORIZE_URL = f"https://{DEFAULT_AUTH0_DOMAIN}/authorize"
+
+
+def _b64(payload):
+    raw = json.dumps(payload).encode()
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def make_jwt(expires_in=3600, **claims):
+    """An unsigned JWT with a readable payload, which is all the SDK decodes."""
+
+    payload = {"sub": "auth0|1", **claims}
+    if expires_in is not None:
+        payload["exp"] = int(time.time() + expires_in)
+    return f"{_b64({'alg': 'RS256', 'typ': 'JWT'})}.{_b64(payload)}.signature"
+
+
+class FakeServer:
+    """Stands in for the loopback redirect server, with no socket at all."""
+
+    def __init__(self, params=None, *, port=8123, raises=None):
+        self.params = params or {}
+        self.port = port
+        self.raises = raises
+        self.mode = None
+        self.closed = False
+        self.waited = False
+
+    def __call__(self, *, mode="query", port=0, redirect_host="localhost", timeout=300.0):
+        self.mode = mode
+        self.redirect_host = redirect_host
+        self.timeout = timeout
+        if port:
+            self.port = port
+        return self
+
+    @property
+    def redirect_uri(self):
+        return f"http://localhost:{self.port}/"
+
+    def wait(self):
+        self.waited = True
+        if self.raises is not None:
+            raise self.raises
+        return dict(self.params)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed = True
+
+
+class Recorder:
+    """Collects the URLs a flow would have opened or printed."""
+
+    def __init__(self, opens=True):
+        self.opened = []
+        self.printed = []
+        self._opens = opens
+
+    def open(self, url):
+        self.opened.append(url)
+        return self._opens
+
+    def write(self, message):
+        self.printed.append(message)
+
+    @property
+    def text(self):
+        return "\n".join(self.printed)
+
+
+AMBIENT_ENV_VARS = (
+    "MERMAID_API_KEY",
+    "MERMAID_API_URL",
+    "MERMAID_AUTH0_DOMAIN",
+    "MERMAID_CLIENT_ID",
+    "MERMAID_AUDIENCE",
+    "SSH_CONNECTION",
+    "SSH_TTY",
+)
 
 
 @pytest.fixture(autouse=True)
-def _no_ambient_credentials(monkeypatch):
-    """Keep developer environment variables out of the tests."""
+def _no_ambient_credentials(monkeypatch, tmp_path):
+    """Keep developer environment variables and token caches out of the tests."""
 
-    monkeypatch.delenv("MERMAID_API_KEY", raising=False)
-    monkeypatch.delenv("MERMAID_API_URL", raising=False)
+    for name in AMBIENT_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    # Point the OAuth token cache at a throwaway directory so a real login on
+    # the developer's machine cannot leak into (or be clobbered by) a test.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
+@pytest.fixture(autouse=True)
+def _no_browser(monkeypatch):
+    """A test that reaches for a real browser is a bug in the test."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a test tried to open a browser")
+
+    monkeypatch.setattr("webbrowser.open", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _no_outbound_network(monkeypatch):
+    """Let the loopback callback server through, block everything else."""
+
+    connect = socket.socket.connect
+
+    def guard(self, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            raise AssertionError(f"a test tried to connect to {address!r}")
+        return connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guard)
 
 
 @pytest.fixture

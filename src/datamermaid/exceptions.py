@@ -14,6 +14,8 @@ from typing import Any
 import httpx
 
 __all__ = [
+    "AuthFlowError",
+    "AuthTimeoutError",
     "AuthenticationError",
     "MermaidAPIError",
     "MermaidConnectionError",
@@ -31,6 +33,23 @@ class MermaidError(Exception):
 
 class MermaidConnectionError(MermaidError):
     """The request never produced a response (DNS, TLS, timeout, reset)."""
+
+
+class AuthFlowError(MermaidError):
+    """An interactive login could not be completed.
+
+    Distinct from :class:`AuthenticationError`, which is the API rejecting
+    credentials that were sent.  ``payload`` holds the OAuth error body when
+    the provider supplied one.
+    """
+
+    def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.payload: dict[str, Any] = payload or {}
+
+
+class AuthTimeoutError(AuthFlowError):
+    """The user did not finish the login before the flow gave up."""
 
 
 class MermaidAPIError(MermaidError):

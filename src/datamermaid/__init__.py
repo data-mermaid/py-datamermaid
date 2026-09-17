@@ -5,15 +5,33 @@ Quickstart:
     >>> with MermaidClient(api_key="mmd_abc.def") as client:  # doctest: +SKIP
     ...     print(client.me().full_name)
     ...     projects = client.projects.list()
+
+Without an API key, log in through the browser once and the token is reused:
+    >>> import datamermaid
+    >>> datamermaid.login()  # doctest: +SKIP
+    >>> with datamermaid.MermaidClient() as client:  # doctest: +SKIP
+    ...     print(client.me().full_name)
 """
 
 from __future__ import annotations
 
 from ._version import __version__
-from .auth import AnonymousAuth, APIKeyAuth, Auth
+from .auth import (
+    AnonymousAuth,
+    APIKeyAuth,
+    Auth,
+    Auth0Config,
+    OAuth,
+    TokenCache,
+    TokenSet,
+    login,
+    logout,
+)
 from .client import BASE_URL_ENV_VAR, DEFAULT_BASE_URL, DEV_BASE_URL, MermaidClient
 from .exceptions import (
     AuthenticationError,
+    AuthFlowError,
+    AuthTimeoutError,
     MermaidAPIError,
     MermaidConnectionError,
     MermaidError,
@@ -32,6 +50,9 @@ __all__ = [
     "APIModel",
     "AnonymousAuth",
     "Auth",
+    "Auth0Config",
+    "AuthFlowError",
+    "AuthTimeoutError",
     "AuthenticationError",
     "Me",
     "MermaidAPIError",
@@ -39,10 +60,15 @@ __all__ = [
     "MermaidConnectionError",
     "MermaidError",
     "NotFoundError",
+    "OAuth",
     "PaginatedList",
     "Project",
     "ProjectMembership",
     "RateLimitError",
     "ServerError",
+    "TokenCache",
+    "TokenSet",
     "__version__",
+    "login",
+    "logout",
 ]
