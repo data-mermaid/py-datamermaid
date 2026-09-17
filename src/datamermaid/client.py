@@ -157,7 +157,11 @@ class MermaidClient:
 
     @property
     def projects(self) -> ProjectsResource:
-        """Access to the ``/projects/`` endpoints."""
+        """Access to the ``/projects/`` endpoints.
+
+        Call it with a project id (``client.projects(project_id)``) for that
+        project's own sites, sample events and survey collections.
+        """
 
         from .resources.projects import ProjectsResource
 

@@ -49,6 +49,63 @@ with MermaidClient() as client:  # or MermaidClient(api_key="mmd_<key_id>.<secre
 
 The key is sent as `Authorization: Bearer mmd_<key_id>.<secret>`.
 
+### Project data
+
+Everything recorded under one project hangs off a project handle, which you get
+by calling `client.projects` with a project id (or a `Project` you already
+fetched). `client.projects.get(id)` fetches the project record itself;
+`client.projects(id)` opens what is recorded under it:
+
+```python
+project = client.projects("d5491b25-4a5f-401b-a50f-bb80fd1df78f")
+
+for site in project.sites.list():
+    print(site.name, site.reef_type)
+
+survey = project.beltfish_methods.get(method_id)
+print(survey.sample_event.sample_date, survey.fishbelt_transect.len_surveyed)
+for observation in survey.observations["obs_belt_fishes"]:
+    print(observation["size"], observation["count"])
+```
+
+Building the handle issues no request, and each collection below it is the same
+lazy `PaginatedList` as everywhere else, with `.list(**filters)`, `.get(id)` and
+`.to_df()`:
+
+| Attribute | Route under `/projects/{id}/` | Model |
+| --- | --- | --- |
+| `project.sites` | `sites/` | `Site` |
+| `project.managements` | `managements/` | `Management` |
+| `project.observers` | `observers/` | `Observer` |
+| `project.project_profiles` | `project_profiles/` | `ProjectProfile` |
+| `project.sample_events` | `sampleevents/` | `SampleEvent` |
+| `project.fishbelt_transects` | `fishbelttransects/` | `FishBeltTransect` |
+| `project.benthic_transects` | `benthictransects/` | `BenthicTransect` |
+| `project.beltfish_methods` | `beltfishtransectmethods/` | `BeltFishMethod` |
+| `project.benthiclit_methods` | `benthiclittransectmethods/` | `BenthicLITMethod` |
+| `project.benthicpit_methods` | `benthicpittransectmethods/` | `BenthicPITMethod` |
+| `project.benthicpqt_methods` | `benthicphotoquadrattransectmethods/` | `BenthicPhotoQuadratTransectMethod` |
+| `project.habitatcomplexity_methods` | `habitatcomplexitytransectmethods/` | `HabitatComplexityMethod` |
+| `project.bleachingqc_methods` | `bleachingquadratcollectionmethods/` | `BleachingQuadratCollectionMethod` |
+| `project.beltinvert_methods` | `beltinverttransectmethods/` | `BeltInvertMethod` |
+
+The `*_methods` collections are the sample units with their observations: one
+record per survey, carrying the `SampleEvent`, the transect or quadrat
+collection it was recorded on, the `Observer`s who recorded it, and the
+observation rows. Those rows stay as plain dictionaries, since their columns
+differ per protocol and run to thousands of rows per survey:
+
+```python
+survey.sample_unit  # the transect or quadrat collection, whatever the protocol
+survey.observations  # {"obs_belt_fishes": ({...}, {...}), ...}
+survey.observers[0].profile_name
+
+# One flat table of every fish belt survey in the project.
+project.beltfish_methods.list().to_df()
+```
+
+All of these need credentials with access to the project.
+
 ### Reference data and summaries
 
 Beyond `/projects/`, every top-level route is reachable as a client attribute

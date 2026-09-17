@@ -11,25 +11,43 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from datetime import date, datetime, timezone
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 __all__ = [
     "APIModel",
+    "BeltFishMethod",
+    "BeltInvertMethod",
     "BenthicAttribute",
+    "BenthicLITMethod",
+    "BenthicPITMethod",
+    "BenthicPhotoQuadratTransectMethod",
+    "BenthicTransect",
+    "BleachingQuadratCollectionMethod",
+    "FishBeltTransect",
     "FishFamily",
     "FishGenus",
     "FishSize",
     "FishSpecies",
+    "HabitatComplexityMethod",
     "InvertAttribute",
+    "InvertBeltTransect",
     "InvertSpecies",
     "LabelMapping",
     "Management",
     "Me",
+    "Observer",
     "Project",
     "ProjectMembership",
+    "ProjectProfile",
     "ProjectTag",
+    "QuadratCollection",
+    "QuadratTransect",
+    "SampleEvent",
+    "SampleUnit",
+    "SampleUnitMethod",
     "Site",
     "SummarySampleEvent",
+    "Transect",
     "parse_date",
     "parse_datetime",
 ]
@@ -111,6 +129,19 @@ def _model_tuple(model: type[M]) -> Callable[[Any], tuple[M, ...]]:
         if isinstance(value, str) or not isinstance(value, Sequence):
             raise TypeError("expected a sequence of objects")
         return tuple(model.from_api(item) for item in value)
+
+    return convert
+
+
+def _model(model: type[M]) -> Callable[[Any], M | None]:
+    """Build a converter turning a nested JSON object into a ``model``."""
+
+    def convert(value: Any) -> M | None:
+        if value is None:
+            return None
+        if not isinstance(value, Mapping):
+            raise TypeError("expected an object")
+        return model.from_api(value)
 
     return convert
 
@@ -593,3 +624,337 @@ class LabelMapping(APIModel):
     provider: str | None = None
     provider_id: str | None = None
     provider_label: str | None = None
+
+
+# -- project-scoped records -------------------------------------------------
+#
+# The models below are only reachable under ``/projects/{project_id}/``.  The
+# sample unit and sample unit method families mirror the API's own class
+# hierarchy: a sample unit is a transect or a quadrat collection, and a sample
+# unit method is one protocol recorded on one sample unit.
+
+
+@dataclass(frozen=True)
+class SampleEvent(APIModel):
+    """A site visited on a date under a management regime.
+
+    ``GET /projects/{project_id}/sampleevents/``.  Every sample unit belongs to
+    one of these; ``site`` and ``management`` hold ids of records listed by
+    the project's :class:`~datamermaid.resources.project_context.ProjectContext`.
+    """
+
+    id: str | None = None
+    site: str | None = None
+    management: str | None = None
+    sample_date: date | None = field(default=None, metadata=_api_meta(converter=parse_date))
+    notes: str | None = None
+    validations: Any = None
+    created_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    updated_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    created_by: str | None = None
+    updated_by: str | None = None
+
+
+@dataclass(frozen=True)
+class Observer(APIModel):
+    """A profile credited with one sample unit method.
+
+    ``GET /projects/{project_id}/observers/``.  ``transectmethod`` is the id of
+    the method record the observer worked on.
+    """
+
+    id: str | None = None
+    transectmethod: str | None = None
+    profile: str | None = None
+    profile_name: str | None = None
+    rank: int | None = None
+    created_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    updated_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    created_by: str | None = None
+    updated_by: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectProfile(APIModel):
+    """A profile's membership of one project.
+
+    ``GET /projects/{project_id}/project_profiles/``.  ``role`` is the numeric
+    role (90 admin, 50 collector, 10 read-only), summarised by
+    :attr:`is_admin` and :attr:`is_collector`.
+    """
+
+    id: str | None = None
+    project: str | None = None
+    profile: str | None = None
+    profile_name: str | None = None
+    email: str | None = None
+    role: int | None = None
+    is_admin: bool | None = None
+    is_collector: bool | None = None
+    picture: str | None = None
+    num_active_sample_units: int | None = None
+    num_account_connections: int | None = None
+    created_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    updated_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    created_by: str | None = None
+    updated_by: str | None = None
+
+
+@dataclass(frozen=True)
+class SampleUnit(APIModel):
+    """What every transect and quadrat collection has in common.
+
+    The choice fields (``visibility``, ``current``, ``relative_depth``,
+    ``tide``) hold ids from ``/choices/``; ``sample_event`` holds the id of the
+    :class:`SampleEvent` the unit was recorded under.
+    """
+
+    id: str | None = None
+    sample_event: str | None = None
+    label: str | None = None
+    depth: float | None = None
+    sample_time: str | None = None
+    visibility: str | None = None
+    current: str | None = None
+    relative_depth: str | None = None
+    tide: str | None = None
+    notes: str | None = None
+    collect_record_id: str | None = None
+    created_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    updated_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    created_by: str | None = None
+    updated_by: str | None = None
+
+
+@dataclass(frozen=True)
+class Transect(SampleUnit):
+    """A numbered transect of a surveyed length."""
+
+    number: int | None = None
+    len_surveyed: float | None = None
+    reef_slope: str | None = None
+
+
+@dataclass(frozen=True)
+class FishBeltTransect(Transect):
+    """A fish belt transect (``/projects/{project_id}/fishbelttransects/``).
+
+    ``width`` and ``size_bin`` hold ids of the belt width and fish size bin the
+    transect was surveyed with.
+    """
+
+    width: str | None = None
+    size_bin: str | None = None
+
+
+@dataclass(frozen=True)
+class BenthicTransect(Transect):
+    """A benthic transect (``/projects/{project_id}/benthictransects/``).
+
+    Shared by the benthic LIT, benthic PIT and habitat complexity protocols.
+    """
+
+
+@dataclass(frozen=True)
+class InvertBeltTransect(Transect):
+    """A macroinvertebrate belt transect, as nested in a method payload."""
+
+    width: str | None = None
+    size_bin: str | None = None
+
+
+@dataclass(frozen=True)
+class QuadratTransect(Transect):
+    """A benthic photo quadrat transect, as nested in a method payload."""
+
+    quadrat_size: float | None = None
+    num_quadrats: int | None = None
+    num_points_per_quadrat: int | None = None
+    quadrat_number_start: int | None = None
+
+
+@dataclass(frozen=True)
+class QuadratCollection(SampleUnit):
+    """A bleaching quadrat collection, as nested in a method payload."""
+
+    quadrat_size: float | None = None
+
+
+@dataclass(frozen=True)
+class SampleUnitMethod(APIModel):
+    """One protocol recorded on one sample unit.
+
+    Subclasses name the protocol's sample unit and its observation lists; the
+    observations themselves stay as plain dictionaries, since they carry a
+    row per fish, point or colony and their columns differ by protocol.
+    :attr:`sample_unit` and :attr:`observations` reach both without knowing
+    which protocol is in hand.
+    """
+
+    id: str | None = None
+    sample_event: SampleEvent | None = field(
+        default=None, metadata=_api_meta(converter=_model(SampleEvent))
+    )
+    observers: tuple[Observer, ...] = field(
+        default=(), metadata=_api_meta(converter=_model_tuple(Observer))
+    )
+    collect_record_id: str | None = None
+    created_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    updated_on: datetime | None = field(default=None, metadata=_api_meta(converter=parse_datetime))
+    created_by: str | None = None
+    updated_by: str | None = None
+
+    #: Name of the field holding this protocol's transect or quadrat collection.
+    SAMPLE_UNIT_FIELD: ClassVar[str] = ""
+
+    @property
+    def sample_unit(self) -> SampleUnit | None:
+        """The transect or quadrat collection the protocol was recorded on."""
+
+        if not self.SAMPLE_UNIT_FIELD:
+            return None
+        unit = getattr(self, self.SAMPLE_UNIT_FIELD, None)
+        return unit if isinstance(unit, SampleUnit) else None
+
+    @property
+    def observations(self) -> dict[str, tuple[Mapping[str, Any], ...]]:
+        """The protocol's observation lists, keyed by their ``obs_*`` field name.
+
+        Lists the API adds later are picked up too, since they land in
+        :attr:`~APIModel.extra`.
+        """
+
+        found: dict[str, tuple[Mapping[str, Any], ...]] = {}
+        for key, value in sorted(self.to_dict().items()):
+            if not key.startswith("obs_"):
+                continue
+            found[key] = _mapping_tuple(value) if value else ()
+        return found
+
+
+@dataclass(frozen=True)
+class BeltFishMethod(SampleUnitMethod):
+    """A fish belt survey (``/projects/{project_id}/beltfishtransectmethods/``)."""
+
+    fishbelt_transect: FishBeltTransect | None = field(
+        default=None, metadata=_api_meta(converter=_model(FishBeltTransect))
+    )
+    obs_belt_fishes: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "fishbelt_transect"
+
+
+@dataclass(frozen=True)
+class BenthicLITMethod(SampleUnitMethod):
+    """A benthic LIT survey (``/projects/{project_id}/benthiclittransectmethods/``)."""
+
+    benthic_transect: BenthicTransect | None = field(
+        default=None, metadata=_api_meta(converter=_model(BenthicTransect))
+    )
+    obs_benthic_lits: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "benthic_transect"
+
+
+@dataclass(frozen=True)
+class BenthicPITMethod(SampleUnitMethod):
+    """A benthic PIT survey (``/projects/{project_id}/benthicpittransectmethods/``).
+
+    ``interval_size`` and ``interval_start`` are in metres along the transect.
+    """
+
+    benthic_transect: BenthicTransect | None = field(
+        default=None, metadata=_api_meta(converter=_model(BenthicTransect))
+    )
+    interval_size: float | None = None
+    interval_start: float | None = None
+    obs_benthic_pits: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "benthic_transect"
+
+
+@dataclass(frozen=True)
+class HabitatComplexityMethod(SampleUnitMethod):
+    """A habitat complexity survey.
+
+    ``/projects/{project_id}/habitatcomplexitytransectmethods/``.
+    """
+
+    benthic_transect: BenthicTransect | None = field(
+        default=None, metadata=_api_meta(converter=_model(BenthicTransect))
+    )
+    interval_size: float | None = None
+    interval_start: float | None = None
+    obs_habitat_complexities: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "benthic_transect"
+
+
+@dataclass(frozen=True)
+class BenthicPhotoQuadratTransectMethod(SampleUnitMethod):
+    """A benthic photo quadrat survey.
+
+    ``/projects/{project_id}/benthicphotoquadrattransectmethods/``.  When the
+    observations came from an image classifier, ``image_classification`` is
+    true and ``images`` describes the classified photos.
+    """
+
+    quadrat_transect: QuadratTransect | None = field(
+        default=None, metadata=_api_meta(converter=_model(QuadratTransect))
+    )
+    image_classification: bool | None = None
+    images: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+    obs_benthic_photo_quadrats: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "quadrat_transect"
+
+
+@dataclass(frozen=True)
+class BleachingQuadratCollectionMethod(SampleUnitMethod):
+    """A bleaching quadrat collection survey.
+
+    ``/projects/{project_id}/bleachingquadratcollectionmethods/``.  This is the
+    one protocol with two observation lists: the bleached colony counts and the
+    per-quadrat benthic percentages.
+    """
+
+    quadrat_collection: QuadratCollection | None = field(
+        default=None, metadata=_api_meta(converter=_model(QuadratCollection))
+    )
+    obs_colonies_bleached: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+    obs_quadrat_benthic_percent: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "quadrat_collection"
+
+
+@dataclass(frozen=True)
+class BeltInvertMethod(SampleUnitMethod):
+    """A macroinvertebrate belt survey.
+
+    ``/projects/{project_id}/beltinverttransectmethods/``.
+    """
+
+    beltinvert_transect: InvertBeltTransect | None = field(
+        default=None, metadata=_api_meta(converter=_model(InvertBeltTransect))
+    )
+    obs_belt_inverts: tuple[Mapping[str, Any], ...] = field(
+        default=(), metadata=_api_meta(converter=_mapping_tuple)
+    )
+
+    SAMPLE_UNIT_FIELD = "beltinvert_transect"

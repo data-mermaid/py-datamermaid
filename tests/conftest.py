@@ -199,3 +199,13 @@ def reference_payload(attribute):
     """One record as the API returns it, keyed by client attribute name."""
 
     return load_fixture("reference_responses")[attribute]
+
+
+#: The project the payloads in ``project_responses.json`` belong to.
+PROJECT_ID = "9bf0538e-99c7-405b-a54b-a1568c8a757e"
+
+
+def project_scoped_payload(attribute):
+    """One project-scoped record, keyed by :class:`ProjectContext` attribute name."""
+
+    return load_fixture("project_responses")[attribute]

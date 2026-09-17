@@ -1,0 +1,616 @@
+{
+  "beltfish_methods": {
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "fishbelt_transect": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000001",
+      "label": "",
+      "len_surveyed": 50.0,
+      "notes": "",
+      "number": 1,
+      "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "size_bin": "7c2d3e44-3e0e-4a17-9b02-71a2d0c5e077",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11",
+      "width": "4f0f1c26-91d9-4a4b-9f8f-6d51e9b3a066"
+    },
+    "id": "ffffffff-0000-0000-0000-000000000001",
+    "obs_belt_fishes": [
+      {
+        "beltfish": "ffffffff-0000-0000-0000-000000000001",
+        "count": 3,
+        "fish_attribute": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f01",
+        "id": "abababab-0000-0000-0000-000000000001",
+        "include": true,
+        "notes": "",
+        "size": 12.5,
+        "size_bin": "7c2d3e44-3e0e-4a17-9b02-71a2d0c5e077"
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000001",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "transect": "eeeeeeee-0000-0000-0000-000000000001",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "beltinvert_methods": {
+    "beltinvert_transect": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000003",
+      "label": "",
+      "len_surveyed": 50.0,
+      "notes": "",
+      "number": 1,
+      "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "size_bin": "8d3e4f55-4f1f-4b28-8c13-82b3e1d6f188",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11",
+      "width": "4f0f1c26-91d9-4a4b-9f8f-6d51e9b3a066"
+    },
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "ffffffff-0000-0000-0000-000000000007",
+    "obs_belt_inverts": [
+      {
+        "beltinvert": "ffffffff-0000-0000-0000-000000000007",
+        "count": 2,
+        "id": "abababab-0000-0000-0000-000000000008",
+        "include": true,
+        "invert_attribute": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f07",
+        "notes": "",
+        "size": 7.5
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000007",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "transect": "eeeeeeee-0000-0000-0000-000000000003",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "benthic_transects": {
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+    "depth": 5.0,
+    "id": "eeeeeeee-0000-0000-0000-000000000002",
+    "label": "",
+    "len_surveyed": 50.0,
+    "notes": "",
+    "number": 1,
+    "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+    "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+    "sample_event": "cccccccc-0000-0000-0000-000000000001",
+    "sample_time": "09:30:00",
+    "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11"
+  },
+  "benthiclit_methods": {
+    "benthic_transect": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000002",
+      "label": "",
+      "len_surveyed": 50.0,
+      "notes": "",
+      "number": 1,
+      "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11"
+    },
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "ffffffff-0000-0000-0000-000000000002",
+    "obs_benthic_lits": [
+      {
+        "attribute": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f02",
+        "benthiclit": "ffffffff-0000-0000-0000-000000000002",
+        "growth_form": null,
+        "id": "abababab-0000-0000-0000-000000000002",
+        "include": true,
+        "length": 120,
+        "notes": ""
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000002",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "transect": "eeeeeeee-0000-0000-0000-000000000002",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "benthicpit_methods": {
+    "benthic_transect": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000002",
+      "label": "",
+      "len_surveyed": 50.0,
+      "notes": "",
+      "number": 1,
+      "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11"
+    },
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "ffffffff-0000-0000-0000-000000000003",
+    "interval_size": 0.5,
+    "interval_start": 0.5,
+    "obs_benthic_pits": [
+      {
+        "attribute": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f03",
+        "benthicpit": "ffffffff-0000-0000-0000-000000000003",
+        "growth_form": null,
+        "id": "abababab-0000-0000-0000-000000000003",
+        "include": true,
+        "interval": 0.5,
+        "notes": ""
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000003",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "transect": "eeeeeeee-0000-0000-0000-000000000002",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "benthicpqt_methods": {
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "ffffffff-0000-0000-0000-000000000004",
+    "image_classification": false,
+    "images": [],
+    "obs_benthic_photo_quadrats": [
+      {
+        "attribute": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f04",
+        "benthic_photo_quadrat_transect": "ffffffff-0000-0000-0000-000000000004",
+        "growth_form": null,
+        "id": "abababab-0000-0000-0000-000000000004",
+        "include": true,
+        "notes": "",
+        "num_points": 25,
+        "quadrat_number": 1
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000004",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "quadrat_transect": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000004",
+      "label": "",
+      "len_surveyed": 50.0,
+      "notes": "",
+      "num_points_per_quadrat": 100,
+      "num_quadrats": 10,
+      "number": 1,
+      "quadrat_number_start": 1,
+      "quadrat_size": 1.0,
+      "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11"
+    },
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "bleachingqc_methods": {
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "ffffffff-0000-0000-0000-000000000006",
+    "obs_colonies_bleached": [
+      {
+        "attribute": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f06",
+        "bleachingquadratcollection": "ffffffff-0000-0000-0000-000000000006",
+        "count_100": 0,
+        "count_20": 0,
+        "count_50": 0,
+        "count_80": 0,
+        "count_dead": 0,
+        "count_normal": 4,
+        "count_pale": 1,
+        "growth_form": null,
+        "id": "abababab-0000-0000-0000-000000000006",
+        "notes": ""
+      }
+    ],
+    "obs_quadrat_benthic_percent": [
+      {
+        "bleachingquadratcollection": "ffffffff-0000-0000-0000-000000000006",
+        "id": "abababab-0000-0000-0000-000000000007",
+        "notes": "",
+        "percent_algae": 20.0,
+        "percent_hard": 30.0,
+        "percent_soft": 10.0,
+        "quadrat_number": 1
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000006",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "quadrat": "eeeeeeee-0000-0000-0000-000000000005",
+    "quadrat_collection": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000005",
+      "label": "",
+      "notes": "",
+      "quadrat_size": 1.0,
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11"
+    },
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "fishbelt_transects": {
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+    "depth": 5.0,
+    "id": "eeeeeeee-0000-0000-0000-000000000001",
+    "label": "",
+    "len_surveyed": 50.0,
+    "notes": "",
+    "number": 1,
+    "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+    "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+    "sample_event": "cccccccc-0000-0000-0000-000000000001",
+    "sample_time": "09:30:00",
+    "size_bin": "7c2d3e44-3e0e-4a17-9b02-71a2d0c5e077",
+    "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11",
+    "width": "4f0f1c26-91d9-4a4b-9f8f-6d51e9b3a066"
+  },
+  "habitatcomplexity_methods": {
+    "benthic_transect": {
+      "collect_record_id": null,
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "current": "8b7c2a5e-2a52-4c2a-b8f9-6f4b0a2b9c33",
+      "depth": 5.0,
+      "id": "eeeeeeee-0000-0000-0000-000000000002",
+      "label": "",
+      "len_surveyed": 50.0,
+      "notes": "",
+      "number": 1,
+      "reef_slope": "5e94e2cb-6a5a-4f1b-bb2a-9d4e2a3f7c55",
+      "relative_depth": "1a1f59d9-5a07-4f56-96b2-63ef0d1f8b22",
+      "sample_event": "cccccccc-0000-0000-0000-000000000001",
+      "sample_time": "09:30:00",
+      "tide": "6d0d2b53-7b7a-4a54-9c5e-90c2a8b1f044",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "visibility": "3e5c2cb7-4e6b-4a0c-9d2f-1d1a0d1f9a11"
+    },
+    "collect_record_id": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "ffffffff-0000-0000-0000-000000000005",
+    "interval_size": 5.0,
+    "interval_start": 5.0,
+    "obs_habitat_complexities": [
+      {
+        "habitatcomplexity": "ffffffff-0000-0000-0000-000000000005",
+        "id": "abababab-0000-0000-0000-000000000005",
+        "include": true,
+        "interval": 5.0,
+        "notes": "",
+        "score": "0c6f2a1a-1d8a-4a4f-bb1a-1c1b1d1e1f05"
+      }
+    ],
+    "observers": [
+      {
+        "created_by": "22222222-2222-2222-2222-222222222222",
+        "created_on": "2019-05-02T18:43:11.000000Z",
+        "id": "dddddddd-0000-0000-0000-000000000001",
+        "profile": "22222222-2222-2222-2222-222222222222",
+        "profile_name": "Ada Lovelace",
+        "rank": 1,
+        "transectmethod": "ffffffff-0000-0000-0000-000000000005",
+        "updated_by": "22222222-2222-2222-2222-222222222222",
+        "updated_on": "2021-07-19T12:00:00.000000Z"
+      }
+    ],
+    "sample_event": {
+      "created_by": "22222222-2222-2222-2222-222222222222",
+      "created_on": "2019-05-02T18:43:11.000000Z",
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "management": "bbbbbbbb-0000-0000-0000-000000000001",
+      "notes": "",
+      "sample_date": "2019-04-17",
+      "site": "aaaaaaaa-0000-0000-0000-000000000001",
+      "updated_by": "22222222-2222-2222-2222-222222222222",
+      "updated_on": "2021-07-19T12:00:00.000000Z",
+      "validations": null
+    },
+    "transect": "eeeeeeee-0000-0000-0000-000000000002",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "managements": {
+    "access_restriction": false,
+    "boundary": null,
+    "compliance": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "est_year": null,
+    "gear_restriction": false,
+    "id": "bbbbbbbb-0000-0000-0000-000000000001",
+    "name": "Gau_open",
+    "name_secondary": "",
+    "no_take": false,
+    "notes": "",
+    "open_access": true,
+    "parties": [],
+    "periodic_closure": false,
+    "predecessor": null,
+    "project": "9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "rules": "Open Access",
+    "size": null,
+    "size_limits": false,
+    "species_restriction": false,
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "validations": null
+  },
+  "observers": {
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "dddddddd-0000-0000-0000-000000000001",
+    "profile": "22222222-2222-2222-2222-222222222222",
+    "profile_name": "Ada Lovelace",
+    "rank": 1,
+    "transectmethod": "ffffffff-0000-0000-0000-000000000001",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "project_profiles": {
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "email": "ada@example.org",
+    "id": "99999999-0000-0000-0000-000000000001",
+    "is_admin": true,
+    "is_collector": true,
+    "num_account_connections": 1,
+    "num_active_sample_units": 0,
+    "picture": null,
+    "profile": "22222222-2222-2222-2222-222222222222",
+    "profile_name": "Ada Lovelace",
+    "project": "9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "role": 90,
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z"
+  },
+  "sample_events": {
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "id": "cccccccc-0000-0000-0000-000000000001",
+    "management": "bbbbbbbb-0000-0000-0000-000000000001",
+    "notes": "",
+    "sample_date": "2019-04-17",
+    "site": "aaaaaaaa-0000-0000-0000-000000000001",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "validations": null
+  },
+  "sites": {
+    "country": "dd865c41-6f84-4e47-8fd7-8a6de436881f",
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "exposure": "26f27b61-cf43-4c70-9c2e-2b1b8b3a0a2f",
+    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "location": {
+      "coordinates": [
+        179.2251,
+        -17.97855
+      ],
+      "type": "Point"
+    },
+    "name": "Anthias Avenue",
+    "notes": "",
+    "predecessor": null,
+    "project": "9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "reef_type": "d6bb0a1e-0b7c-4b04-9e34-2ba7fa6c5d5a",
+    "reef_zone": "2c4d31fa-1c08-4e63-9e9f-43fb2a4f4d84",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "validations": null
+  }
+}

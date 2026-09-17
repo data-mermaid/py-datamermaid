@@ -5,6 +5,25 @@ from __future__ import annotations
 from .base import BaseResource, ReadOnlyResource, Resource
 from .choices import ChoicesResource
 from .me import MeResource
+from .project_context import (
+    PROJECT_RESOURCES,
+    ProjectBeltFishMethodsResource,
+    ProjectBeltInvertMethodsResource,
+    ProjectBenthicLITMethodsResource,
+    ProjectBenthicPITMethodsResource,
+    ProjectBenthicPQTMethodsResource,
+    ProjectBenthicTransectsResource,
+    ProjectBleachingQCMethodsResource,
+    ProjectContext,
+    ProjectFishBeltTransectsResource,
+    ProjectHabitatComplexityMethodsResource,
+    ProjectManagementsResource,
+    ProjectObserversResource,
+    ProjectProfilesResource,
+    ProjectResource,
+    ProjectSampleEventsResource,
+    ProjectSitesResource,
+)
 from .projects import ProjectsResource
 from .reference import (
     REFERENCE_RESOURCES,
@@ -23,6 +42,7 @@ from .reference import (
 )
 
 __all__ = [
+    "PROJECT_RESOURCES",
     "REFERENCE_RESOURCES",
     "BaseResource",
     "BenthicAttributesResource",
@@ -36,6 +56,22 @@ __all__ = [
     "LabelMappingsResource",
     "ManagementsResource",
     "MeResource",
+    "ProjectBeltFishMethodsResource",
+    "ProjectBeltInvertMethodsResource",
+    "ProjectBenthicLITMethodsResource",
+    "ProjectBenthicPITMethodsResource",
+    "ProjectBenthicPQTMethodsResource",
+    "ProjectBenthicTransectsResource",
+    "ProjectBleachingQCMethodsResource",
+    "ProjectContext",
+    "ProjectFishBeltTransectsResource",
+    "ProjectHabitatComplexityMethodsResource",
+    "ProjectManagementsResource",
+    "ProjectObserversResource",
+    "ProjectProfilesResource",
+    "ProjectResource",
+    "ProjectSampleEventsResource",
+    "ProjectSitesResource",
     "ProjectTagsResource",
     "ProjectsResource",
     "ReadOnlyResource",
