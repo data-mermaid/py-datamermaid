@@ -18,3 +18,6 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# RepoMix generated context (see README "AI-friendly repo context")
+repomix-output.*

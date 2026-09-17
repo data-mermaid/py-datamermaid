@@ -220,6 +220,24 @@ The socket itself always listens on `127.0.0.1` only. Use
 that RFC 8252 recommends rather than the `localhost` name. Neither setting
 matters for the `device` flow, which has no redirect at all.
 
+## AI-friendly repo context
+
+The SDK - source, tests and the docs in this file - can be packed into a single
+file for LLMs and coding agents with [RepoMix](https://repomix.com/):
+
+```bash
+npx repomix
+```
+
+That picks up `repomix.config.json` and writes `repomix-output.xml`: one XML
+document with a directory summary and every included file, scanned for secrets
+before it is written. The output is git-ignored, since it is a generated
+artifact - regenerate it rather than committing it.
+
+CI regenerates it on every push to `main` and uploads it as the
+`repomix-output` artifact of the *RepoMix* workflow run, downloadable from the
+Actions tab.
+
 ## Development
 
 See [CLAUDE.md](CLAUDE.md) for build and test commands.
