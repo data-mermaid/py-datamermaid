@@ -1,9 +1,8 @@
-"""Authentication strategies for :class:`~datamermaid.client.MermaidClient`.
+"""The :class:`Auth` seam and the non-interactive credential providers.
 
 The client never inspects credentials directly: it only ever asks an
-:class:`Auth` instance to stamp an outgoing request.  That seam is what lets
-OAuth (device code, client credentials, ...) be added later as another
-:class:`Auth` subclass without changing the client.
+:class:`Auth` instance to stamp an outgoing request.  The OAuth grants live
+in :mod:`datamermaid.auth.oauth`, which builds on the same seam.
 """
 
 from __future__ import annotations
@@ -110,11 +109,13 @@ def resolve_auth(
     api_key: str | None = None,
     *,
     env: bool = True,
+    cache: bool = True,
 ) -> Auth:
     """Pick the credential provider to use.
 
     Precedence: explicit ``auth``, then ``api_key``, then the
-    ``MERMAID_API_KEY`` environment variable, then anonymous access.
+    ``MERMAID_API_KEY`` environment variable, then tokens left behind by
+    :func:`datamermaid.login`, then anonymous access.
     """
 
     if auth is not None:
@@ -127,4 +128,31 @@ def resolve_auth(
         env_key = os.environ.get(API_KEY_ENV_VAR, "").strip()
         if env_key:
             return APIKeyAuth(env_key)
+    if cache:
+        cached = _cached_oauth(env=env)
+        if cached is not None:
+            return cached
     return AnonymousAuth()
+
+
+def _cached_oauth(*, env: bool) -> Auth | None:
+    """An :class:`~datamermaid.auth.oauth.OAuth` bound to cached tokens, if any.
+
+    Only a token that can still be used without asking the user anything
+    counts: credentials picked up implicitly must never turn an ordinary data
+    call into a browser prompt, so the login is left for the caller to run.
+    Hence ``interactive=False`` as well, in case the token expires mid-session.
+
+    Imported late: the OAuth machinery pulls in the flows, and nothing here
+    needs them until someone has actually logged in.
+    """
+
+    from .oauth import OAuth
+
+    oauth = OAuth(env=env, interactive=False)
+    tokens = oauth.tokens
+    if tokens is None:
+        return None
+    if tokens.refresh_token is None and tokens.is_expired():
+        return None
+    return oauth

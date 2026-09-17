@@ -77,9 +77,17 @@ CI (`.github/workflows/ci.yml`) runs ruff, mypy, and pytest on Python 3.10-3.13.
 - `client.py`: `MermaidClient` wraps an `httpx.Client`; owns the base URL,
   timeouts, the `User-Agent`, retry-with-backoff on 429/5xx, and JSON decoding.
   Resources are reached through it (`client.projects`, `client.me()`).
-- `auth.py`: the `Auth` abstraction (`apply`/`refresh`/`should_refresh`) with
-  `APIKeyAuth` and `AnonymousAuth`. The client only ever calls `Auth`, so new
-  schemes (OAuth) are added here, not in `client.py`.
+- `auth/`: the `Auth` abstraction (`apply`/`refresh`/`should_refresh`) and its
+  implementations. The client only ever calls `Auth`, so new schemes are added
+  here, not in `client.py`.
+  - `base.py`: `Auth`, `APIKeyAuth`, `AnonymousAuth`.
+  - `oauth.py`: `OAuth`, the flow selection, and `login()`/`logout()`.
+  - `flows.py`: the grants (`PkceFlow`, `ImplicitFlow`, `DeviceFlow`,
+    `ManualPasteFlow`) behind a `FlowContext` holding every outside-world seam.
+  - `config.py`: `Auth0Config` (kwargs > env vars > defaults).
+  - `callback_server.py`: the single-shot loopback redirect server.
+  - `token_cache.py` and `jwt.py`: the 0600 token file and the unverified
+    `exp` decode that drives refresh.
 - `exceptions.py`: `MermaidError` hierarchy and the status-code mapping.
 - `models.py`: frozen dataclasses. `APIModel.from_api()` fills declared fields
   and keeps everything else in `extra`.
