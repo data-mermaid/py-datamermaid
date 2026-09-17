@@ -1,0 +1,42 @@
+name: RepoMix
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    name: Pack repository for LLMs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pack repository
+        run: npx -y repomix@1
+
+      - name: Upload packed repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: repomix-output
+          path: repomix-output.xml
+          if-no-files-found: error
+          retention-days: 90
+
+      # When a GitHub Pages docs workflow lands, publish the same file at a
+      # stable URL by copying it into the built site before the upload step of
+      # that workflow, so agents can fetch /repomix-output.xml directly:
+      #
+      #   - run: cp repomix-output.xml <site build dir>/repomix-output.xml

@@ -118,3 +118,14 @@ CI (`.github/workflows/ci.yml`) runs ruff, mypy, and pytest on Python 3.10-3.13.
   field required; the API may omit it.
 - Tests never touch the network. Mock with `respx` and assert on call counts when
   laziness matters.
+
+## AI-Friendly Repo Context
+
+`npx repomix` packs the repository into `repomix-output.xml`, a single XML file
+for LLM consumption, using `repomix.config.json` (includes `src/`, `tests/`,
+`docs/`, `examples/` and the root markdown/TOML files; excludes `.beads/`,
+agent tooling directories, `uv.lock` and build artifacts; secret scanning on).
+
+The output is git-ignored - regenerate it locally instead of committing it.
+`.github/workflows/repomix.yml` regenerates it on pushes to `main` and uploads
+it as the `repomix-output` workflow artifact.
