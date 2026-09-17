@@ -90,7 +90,7 @@ class MermaidClient:
         backoff_factor: Base delay of the exponential backoff, in seconds.
             A ``Retry-After`` header wins over it.
         headers: Extra headers sent with every request.
-        user_agent: Overrides [`..default_user_agent`][].
+        user_agent: Overrides [`default_user_agent`][..default_user_agent].
         transport: An ``httpx`` transport, mainly for tests.
 
     Raises:
@@ -331,7 +331,7 @@ class MermaidClient:
 
         Example:
             ```pycon
-            >>> client.choices()["reeftypes"]
+            >>> client.choices()["reeftypes"]  # doctest: +SKIP
             [{'id': '...', 'name': 'atoll', 'updated_on': '...'}, ...]
             ```
         """

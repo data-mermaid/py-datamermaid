@@ -2,8 +2,7 @@
 
 Call the projects resource with a project id (or a
 [`Project`][datamermaid.models.Project]) to get a
-[`.ProjectContext`][], the handle
-every nested route hangs off:
+[`ProjectContext`][.ProjectContext], the handle every nested route hangs off:
 
 ```python
 client.projects(project_id).sites.list()
@@ -13,8 +12,7 @@ client.projects(project_id).beltfish_methods.get(method_id)
 Each collection behaves exactly like a top-level one: a lazy, filterable
 [`PaginatedList`][datamermaid.pagination.PaginatedList] from ``.list(**filters)`` and a
 single record from ``.get(id)``.  They differ only in their path, so each is a
-[`.ProjectResource`][] declaring its
-route and model.
+[`ProjectResource`][.ProjectResource] declaring its route and model.
 
 The context also carries the aggregated views of
 [`datamermaid.resources.aggregated`][datamermaid.resources.aggregated]
@@ -92,9 +90,9 @@ A = TypeVar("A", bound=AggregatedFamilyResource)
 class ProjectResource(ReadOnlyResource[M]):
     """A read-only collection nested under one project.
 
-    Subclasses declare [`.route`][] and
-    [`model`][datamermaid.resources.base.Resource.model]; the project id turns
-    the route into a path when the resource is built.
+    Subclasses declare [`route`][.route] and
+    [`model`][datamermaid.resources.base.Resource.model]; the project id turns the route
+    into a path when the resource is built.
     """
 
     #: Path segment below the project, e.g. ``"sites/"``.
@@ -162,8 +160,8 @@ class ProjectFishBeltTransectsResource(ProjectResource[FishBeltTransect]):
     """The project's fish belt transects (``fishbelttransects/``).
 
     The transects alone, without the observations recorded on them; for those use
-    [`..ProjectBeltFishMethodsResource`][].
-    Filters: ``sample_event``, ``len_surveyed``, ``width``, ``depth``.
+    [`ProjectBeltFishMethodsResource`][..ProjectBeltFishMethodsResource].  Filters:
+    ``sample_event``, ``len_surveyed``, ``width``, ``depth``.
     """
 
     route = "fishbelttransects/"

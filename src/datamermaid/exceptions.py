@@ -3,7 +3,7 @@
 Every error raised by this package derives from
 [`MermaidError`][datamermaid.exceptions.MermaidError], so ``except MermaidError`` is
 always enough to catch SDK failures.  HTTP failures are mapped to dedicated subclasses
-by [`.raise_for_status`][].
+by [`raise_for_status`][.raise_for_status].
 """
 
 from __future__ import annotations
@@ -39,9 +39,9 @@ class MermaidConnectionError(MermaidError):
 class AuthFlowError(MermaidError):
     """An interactive login could not be completed.
 
-    Distinct from [`..AuthenticationError`][],
-    which is the API rejecting credentials that were sent.  ``payload`` holds the OAuth
-    error body when the provider supplied one.
+    Distinct from [`AuthenticationError`][..AuthenticationError], which is the API
+    rejecting credentials that were sent.  ``payload`` holds the OAuth error body when
+    the provider supplied one.
     """
 
     def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:

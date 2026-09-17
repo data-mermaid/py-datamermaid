@@ -41,7 +41,7 @@ know where to stop, so it materialises everything:
 
 ```python
 species[:25]  # stops after the first page that covers 25 items
-species[::2]  # negative step, so every page is fetched
+species[::2]  # no stop, so every page is fetched
 species[-1]  # likewise: the last item needs the last page
 ```
 

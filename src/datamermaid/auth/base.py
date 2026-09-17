@@ -31,8 +31,8 @@ class Auth(ABC):
     Subclasses implement [`apply`][datamermaid.auth.base.Auth.apply].  Implementations
     that hold expiring credentials additionally override
     [`refresh`][datamermaid.auth.base.Auth.refresh] and
-    [`.should_refresh`][], which together give
-    them a single retry after an authentication failure.
+    [`should_refresh`][.should_refresh], which together give them a single retry after
+    an authentication failure.
     """
 
     @abstractmethod
@@ -45,11 +45,11 @@ class Auth(ABC):
         return None
 
     def should_refresh(self, response: httpx.Response) -> bool:
-        """Whether ``response`` warrants a
-        [`refresh`][datamermaid.auth.base.Auth.refresh] and one retry.
+        """Whether ``response`` warrants refreshing the credentials and one retry.
 
-        The response body has not been read at this point, so implementations
-        must decide based on the status code and headers only.
+        The retry goes through [`refresh`][datamermaid.auth.base.Auth.refresh].  The
+        response body has not been read at this point, so implementations must decide
+        based on the status code and headers only.
         """
 
         return False

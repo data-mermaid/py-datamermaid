@@ -117,8 +117,7 @@ class _CallbackServer(HTTPServer):
 class _CallbackHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
     server_version = "datamermaid"
-    #: Read timeout for the accepted socket; see
-    #: [`..HANDLER_TIMEOUT`][].
+    #: Read timeout for the accepted socket; see [`HANDLER_TIMEOUT`][..HANDLER_TIMEOUT].
     #: ``handle_one_request`` turns the resulting ``TimeoutError`` into a
     #: closed connection, and the wait loop moves on to the next caller.
     timeout = HANDLER_TIMEOUT
@@ -156,10 +155,9 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 class LoopbackCallbackServer:
     """Serve exactly one OAuth redirect on ``127.0.0.1``.
 
-    The socket is bound as soon as the object is created, so the ephemeral port
-    (and therefore
-    [`.redirect_uri`][])
-    is known before the authorization URL is built.
+    The socket is bound as soon as the object is created, so the ephemeral port (and
+    therefore [`redirect_uri`][.redirect_uri]) is known before the authorization URL is
+    built.
     """
 
     def __init__(

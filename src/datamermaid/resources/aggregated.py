@@ -12,13 +12,11 @@ project.benthicpits.sample_events().to_df()
 ```
 
 The seven families differ only in their route and their columns, so each is an
-[`.AggregatedViewFamily`][]
-describing the former, and all of them share one
-[`.AggregatedFamilyResource`][]
-and one light [`AggregatedRecord`][datamermaid.models.AggregatedRecord], whose declared
-fields are the few every view has in common.  Bleaching is the exception: it publishes
-two observation views, so it gets
-[`.BleachingQCFamilyResource`][].
+[`AggregatedViewFamily`][.AggregatedViewFamily] describing the former, and all of them
+share one [`AggregatedFamilyResource`][.AggregatedFamilyResource] and one light
+[`AggregatedRecord`][datamermaid.models.AggregatedRecord], whose declared fields are the
+few every view has in common.  Bleaching is the exception: it publishes two observation
+views, so it gets [`BleachingQCFamilyResource`][.BleachingQCFamilyResource].
 
 Sub-route names follow ``mermaid-api``'s ``src/api/urls.py`` (dev branch).
 """
@@ -54,8 +52,7 @@ __all__ = [
 class AggregatedViewFamily:
     """One protocol's aggregated views, as route segments under a project.
 
-    [`.family`][] is both the
-    first segment of the route and the attribute the
+    [`family`][.family] is both the first segment of the route and the attribute the
     [`ProjectContext`][datamermaid.resources.project_context.ProjectContext] exposes it
     as, e.g. ``beltfishes`` for ``/projects/{id}/beltfishes/``.
     """
@@ -133,10 +130,10 @@ class AggregatedFamilyResource(Resource[AggregatedRecord]):
 class BleachingQCFamilyResource(AggregatedFamilyResource):
     """The bleaching quadrat collections, which publish two observation views.
 
-    [`.colonies_bleached`][] is the per-colony view and
-    [`.quadrat_benthic_percent`][] the per-quadrat benthic cover view;
-    [`.observations`][] is an alias of the former, so the family still answers
-    the same three methods as its siblings.
+    [`colonies_bleached`][.colonies_bleached] is the per-colony view and
+    [`quadrat_benthic_percent`][.quadrat_benthic_percent] the per-quadrat benthic cover
+    view; [`observations`][.observations] is an alias of the former, so the family still
+    answers the same three methods as its siblings.
     """
 
     def colonies_bleached(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
@@ -150,7 +147,9 @@ class BleachingQCFamilyResource(AggregatedFamilyResource):
         return self._view(self.family.views["quadrat_benthic_percent"], filters)
 
     def observations(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
-        """The colonies bleached view; see [`..colonies_bleached`][]."""
+        """The colonies bleached view; see
+        [`colonies_bleached`][..colonies_bleached].
+        """
 
         return self.colonies_bleached(**filters)
 

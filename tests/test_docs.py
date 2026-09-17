@@ -47,7 +47,7 @@ from datamermaid.resources.aggregated import AggregatedFamilyResource
 from datamermaid.resources.base import Resource
 from datamermaid.resources.projects import ProjectsResource
 
-from .conftest import BASE_URL, REPO_ROOT, page
+from .conftest import BASE_URL, PROJECT_ID, REPO_ROOT, page
 
 DOCS = REPO_ROOT / "docs"
 MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
@@ -307,7 +307,9 @@ class ChainResolver:
             )
         # `client.projects(project_id)` opens a project handle.
         if any(isinstance(target, ProjectsResource) for target in self.resolve(node.func, where)):
-            return (PROJECT_CONTEXT,)
+            return tuple(
+                root for root in self.roots.get("project", ()) if isinstance(root, ProjectContext)
+            )
         return ()
 
     def _subscript(self, node: ast.Subscript, where: str) -> tuple[Any, ...]:
@@ -325,51 +327,60 @@ class ChainResolver:
         return tuple(items)
 
 
-CLIENT = MermaidClient(api_key="mmd_key.secret")
-PROJECT_CONTEXT = ProjectContext(CLIENT, "d5491b25-4a5f-401b-a50f-bb80fd1df78f")
+@pytest.fixture(scope="module")
+def roots():
+    """Variable names the guides bind, and every kind of value each one may hold.
 
-#: Variable names the guides bind, and every kind of value each one may hold.
-#: A chain passes when it resolves against at least one of them, which is what
-#: lets ``species`` be both a record and the lazy list it came out of.
-ROOTS: dict[str, tuple[Any, ...]] = {
-    "datamermaid": (datamermaid,),
-    "client": (CLIENT,),
-    "project": (PROJECT_CONTEXT, Project()),
-    "acanthuridae": (FishFamily(),),
-    "auth": (APIKeyAuth("mmd_key.secret"), OAuth(interactive=False)),
-    "first_page": (ListOf(FishSpecies),),
-    "genus": (FishGenus(),),
-    "me": (Me(),),
-    "member": (ProjectProfile(),),
-    "oauth": (OAuth(interactive=False),),
-    "row": (AggregatedRecord(),),
-    "site": (Site(),),
-    "species": (FishSpecies(), ListOf(FishSpecies)),
-    "summary": (SummarySampleEvent(),),
-    "surgeonfish": (FishFamily(),),
-    "survey": (BeltFishMethod(),),
-    "tokens": (TokenSet("header.body.signature"),),
-}
+    A chain passes when it resolves against at least one of them, which is what
+    lets ``species`` be both a record and the lazy list it came out of.
+
+    Built in a fixture rather than at import time so nothing here is constructed
+    before the suite's isolation fixtures; ``cache=False`` and ``env=False`` keep
+    the OAuth objects off the developer's real token cache either way, since
+    ``oauth.tokens`` is one of the documented attributes this resolves.
+    """
+
+    with MermaidClient(api_key="mmd_key.secret", base_url=BASE_URL) as client:
+        oauth = OAuth(interactive=False, cache=False, env=False)
+        yield {
+            "datamermaid": (datamermaid,),
+            "client": (client,),
+            "project": (ProjectContext(client, PROJECT_ID), Project()),
+            "acanthuridae": (FishFamily(),),
+            "auth": (APIKeyAuth("mmd_key.secret"), oauth),
+            "first_page": (ListOf(FishSpecies),),
+            "genus": (FishGenus(),),
+            "me": (Me(),),
+            "member": (ProjectProfile(),),
+            "oauth": (oauth,),
+            "row": (AggregatedRecord(),),
+            "site": (Site(),),
+            "species": (FishSpecies(), ListOf(FishSpecies)),
+            "summary": (SummarySampleEvent(),),
+            "surgeonfish": (FishFamily(),),
+            "survey": (BeltFishMethod(),),
+            "tokens": (TokenSet("header.body.signature"),),
+        }
 
 
 @pytest.mark.parametrize("block", PYTHON_BLOCKS, ids=str)
-def test_attribute_chains_resolve(block):
+def test_attribute_chains_resolve(block, roots):
     """Every documented ``client.x.y`` really is a ``client.x.y``."""
 
-    ChainResolver(ROOTS).check(ast.parse(block.source), str(block))
+    ChainResolver(roots).check(ast.parse(block.source), str(block))
 
 
-def test_the_resolver_catches_a_typo():
+def test_the_resolver_catches_a_typo(roots):
     """Otherwise the test above would pass no matter what the guides claimed."""
 
     with pytest.raises(AssertionError, match="no attribute 'fish_speciez'"):
-        ChainResolver(ROOTS).check(ast.parse("client.fish_speciez.list()"), "made up")
+        ChainResolver(roots).check(ast.parse("client.fish_speciez.list()"), "made up")
 
     with pytest.raises(AssertionError, match="no attribute 'beltfishez'"):
-        ChainResolver(ROOTS).check(ast.parse("project.beltfishez.observations()"), "made up")
+        ChainResolver(roots).check(ast.parse("project.beltfishez.observations()"), "made up")
 
     with pytest.raises(AssertionError, match="no attribute 'displayname'"):
-        ChainResolver(ROOTS).check(
+        ChainResolver(roots).check(
             ast.parse("client.fish_species.list()[0].displayname"), "made up"
         )
 

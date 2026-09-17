@@ -6,9 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Superseded pull request builds are worth cancelling; a run on `main` is not,
+# because cancelling it here would take the deploy job down with it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -44,8 +46,8 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    # Pages allows one deployment at a time, and a half-finished one must not be
-    # cancelled, so this job opts out of the workflow's cancelling group.
+    # Pages allows one deployment at a time, so concurrent runs queue here rather
+    # than race; a half-finished deployment is never cancelled.
     concurrency:
       group: pages
       cancel-in-progress: false

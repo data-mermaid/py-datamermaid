@@ -542,10 +542,9 @@ class InvertSpecies(APIModel):
 class SummarySampleEvent(APIModel):
     """A public summary of one sample event (``GET /summarysampleevents/``).
 
-    The per-protocol aggregates stay in
-    [`.protocols`][], a mapping of
-    protocol name (``beltfish``, ``benthicpit``, ...) to that protocol's summary
-    statistics, which vary by protocol and grow over time.
+    The per-protocol aggregates stay in [`protocols`][.protocols], a mapping of protocol
+    name (``beltfish``, ``benthicpit``, ...) to that protocol's summary statistics, which
+    vary by protocol and grow over time.
     """
 
     sample_event_id: str | None = None
@@ -685,7 +684,7 @@ class ProjectProfile(APIModel):
     ``GET /projects/{project_id}/project_profiles/``.  ``role`` is the numeric role (90
     admin, 50 collector, 10 read-only), summarised by
     [`is_admin`][datamermaid.models.ProjectProfile.is_admin] and
-    [`.is_collector`][].
+    [`is_collector`][.is_collector].
     """
 
     id: str | None = None
@@ -792,9 +791,8 @@ class SampleUnitMethod(APIModel):
     Subclasses name the protocol's sample unit and its observation lists; the
     observations themselves stay as plain dictionaries, since they carry a row per fish,
     point or colony and their columns differ by protocol.
-    [`.sample_unit`][] and
-    [`.observations`][] reach both
-    without knowing which protocol is in hand.
+    [`sample_unit`][.sample_unit] and [`observations`][.observations] reach both without
+    knowing which protocol is in hand.
     """
 
     id: str | None = None
