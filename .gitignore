@@ -4,6 +4,7 @@
 .beads-credential-key
 .beads/proxieddb/
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -24,3 +25,12 @@ repomix-output.*
 
 # MkDocs build output (see README "Documentation")
 site/
+
+.beads/
+.agents/
+.claude/
+.codex/
+
+AGENTS.md
+CLAUDE.md
+examples/marimo/__marimo__/session/*
