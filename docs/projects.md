@@ -210,7 +210,13 @@ with MermaidClient() as client:  # reads MERMAID_API_KEY
 
 `units` is one row per transect. `biomass_kgha` is the transect total;
 `biomass_kgha_fish_family` is a nested mapping of family name to that family's
-share of it. Join the management flags on and aggregate:
+share of it, e.g. `{"Acanthuridae": 402.11, "Serranidae": 128.9}`. Join the
+management flags on and aggregate:
+
+!!! note "The printed output below is illustrative"
+
+    The numbers are made up, to show the shape of the result. Yours depend on
+    the project.
 
 ```python
 no_take = regimes.set_index("id")["no_take"]
