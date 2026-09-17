@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 
-from datamermaid import AnonymousAuth, AuthenticationError, MermaidClient
+from datamermaid import AnonymousAuth, AuthenticationError, AuthFlowError, MermaidClient
 
 #: How many projects to print; the list itself is lazy and unbounded.
 PROJECT_LIMIT = 10
@@ -52,8 +52,10 @@ def main() -> int:
             # rather than halfway through the loop below.
             projects = client.projects.list(limit=PROJECT_LIMIT)
             first_page = projects[:PROJECT_LIMIT]
-        except AuthenticationError as error:
-            print(f"\nThe API rejected the credentials: {error}\n", file=sys.stderr)
+        except (AuthenticationError, AuthFlowError) as error:
+            # A cached OAuth token whose refresh fails raises AuthFlowError
+            # before any request goes out; both mean "log in again".
+            print(f"\nCould not authenticate: {error}\n", file=sys.stderr)
             print(CREDENTIALS_HELP, file=sys.stderr)
             return 0
 

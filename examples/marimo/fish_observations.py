@@ -122,8 +122,18 @@ def _(mo):
 
 
 @app.cell
-def _(client, mo, signed_in):
-    projects = client.projects.list(limit=50)[:50] if signed_in else []
+def _(AuthFlowError, AuthenticationError, client, mo, signed_in):
+    projects = []
+    auth_error = None
+    if signed_in:
+        try:
+            projects = client.projects.list(limit=50)[:50]
+        except (AuthenticationError, AuthFlowError) as error:
+            # A cached OAuth token that can no longer be refreshed raises
+            # AuthFlowError before any request goes out; the API rejecting the
+            # credentials it did send raises AuthenticationError.
+            auth_error = error
+
     project_picker = mo.ui.dropdown(
         options={project.name: project.id for project in projects},
         value=projects[0].name if projects else None,
@@ -133,10 +143,13 @@ def _(client, mo, signed_in):
         100, 2000, step=100, value=500, label="observation rows", show_value=True
     )
 
-    if not signed_in:
+    if not signed_in or auth_error is not None:
+        reason = f"These credentials were rejected: {auth_error}" if auth_error else ""
         picker_view = mo.md(
-            """
-            /// warning | No credentials found
+            f"""
+            /// warning | No usable credentials
+
+            {reason}
 
             Export an API key and restart the notebook:
 
@@ -159,7 +172,7 @@ def _(client, mo, signed_in):
 
 
 @app.cell
-def _(AuthenticationError, client, mo, obs_limit, pd, project_picker):
+def _(AuthFlowError, AuthenticationError, client, mo, obs_limit, pd, project_picker):
     observations = pd.DataFrame()
     note = mo.md("")
 
@@ -168,7 +181,7 @@ def _(AuthenticationError, client, mo, obs_limit, pd, project_picker):
         try:
             rows = project.beltfishes.observations(limit=500)[: obs_limit.value]
             observations = pd.DataFrame([row.to_dict() for row in rows])
-        except AuthenticationError as error:
+        except (AuthenticationError, AuthFlowError) as error:
             # Access to a project does not imply access to its raw
             # observations: the project's fish belt data policy decides.
             note = mo.md(f"/// warning | Observations are not readable: {error} ///")
@@ -234,9 +247,14 @@ def _():
     import altair as alt
     import pandas as pd
 
-    from datamermaid import AnonymousAuth, AuthenticationError, MermaidClient
+    from datamermaid import (
+        AnonymousAuth,
+        AuthenticationError,
+        AuthFlowError,
+        MermaidClient,
+    )
 
-    return AnonymousAuth, AuthenticationError, MermaidClient, alt, pd
+    return AnonymousAuth, AuthFlowError, AuthenticationError, MermaidClient, alt, pd
 
 
 @app.cell

@@ -24,11 +24,22 @@ import sys
 
 import pandas as pd
 
-from datamermaid import AuthenticationError, MermaidClient, NotFoundError, Project
+from datamermaid import (
+    AuthenticationError,
+    AuthFlowError,
+    MermaidClient,
+    NotFoundError,
+    Project,
+)
+from datamermaid.pagination import to_dataframe
 
 #: Rows to pull from the observation view.  It is one row per fish counted, so
 #: a whole project easily runs to six figures.
 DEFAULT_LIMIT = 500
+
+#: Rows per request, kept separate from the row cap above; see the comment on
+#: the observation call in `main`.
+PAGE_SIZE = 500
 
 CREDENTIALS_HELP = """\
 This example needs credentials with access to a project.  Either export an
@@ -98,8 +109,10 @@ def main() -> int:
         print(f"API root: {client.base_url}")
         try:
             record = pick_project(client, args.project_id)
-        except AuthenticationError as error:
-            print(f"\nThe API rejected the credentials: {error}\n", file=sys.stderr)
+        except (AuthenticationError, AuthFlowError) as error:
+            # AuthFlowError covers a cached OAuth token that can no longer be
+            # refreshed, which never reaches the API at all.
+            print(f"\nCould not authenticate: {error}\n", file=sys.stderr)
             print(CREDENTIALS_HELP, file=sys.stderr)
             return 0
         except NotFoundError:
@@ -130,7 +143,7 @@ def main() -> int:
             events = project.sample_events.list(
                 sample_date_after=args.sample_date_after,
             ).to_df()
-        except AuthenticationError as error:
+        except (AuthenticationError, AuthFlowError) as error:
             print(f"\nThe project's records are not readable: {error}\n", file=sys.stderr)
             print(CREDENTIALS_HELP, file=sys.stderr)
             return 0
@@ -139,11 +152,15 @@ def main() -> int:
         # management regime and transect already joined in.  The survey-shaped
         # view of the same data is `project.beltfish_methods.list()`.
         try:
-            observations = project.beltfishes.observations(
-                limit=args.limit,
+            # `limit` is the API's page size, not a row cap, and `.to_df()`
+            # materialises every page -- so the cap has to come from slicing
+            # the lazy list, which stops fetching as soon as it has enough.
+            rows = project.beltfishes.observations(
+                limit=min(args.limit, PAGE_SIZE),
                 sample_date_after=args.sample_date_after,
-            ).to_df()
-        except AuthenticationError as error:
+            )[: args.limit]
+            observations = to_dataframe(rows)
+        except (AuthenticationError, AuthFlowError) as error:
             print(f"\nFish belt observations are not readable here: {error}", file=sys.stderr)
             observations = pd.DataFrame()
 

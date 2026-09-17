@@ -21,7 +21,7 @@ import sys
 
 import pandas as pd
 
-from datamermaid import AuthenticationError, MermaidClient
+from datamermaid import AuthenticationError, AuthFlowError, MermaidClient
 
 #: Page size for the reference routes.  They are small enough to pull whole.
 PAGE_SIZE = 1000
@@ -91,8 +91,10 @@ def main() -> int:
             fish = fish_taxonomy(client)
             benthic = benthic_taxonomy(client)
             choice_sets = client.choices()
-        except AuthenticationError as error:
-            print(f"\nThe API rejected the request: {error}\n", file=sys.stderr)
+        except (AuthenticationError, AuthFlowError) as error:
+            # These routes are public, but a stale cached OAuth token still
+            # fails before the request is sent.
+            print(f"\nThe request could not be made: {error}\n", file=sys.stderr)
             print(CREDENTIALS_HELP, file=sys.stderr)
             return 0
 
