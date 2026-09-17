@@ -162,14 +162,29 @@ def token_set(payload: dict[str, Any], ctx: FlowContext) -> TokenSet:
         raise AuthFlowError(str(exc), payload=payload) from exc
 
 
-def _check_callback(params: dict[str, str], state: str) -> None:
+def _check_callback(params: dict[str, str], state: str, *, require_state: bool = True) -> None:
+    """Reject a callback that is not the answer to the request we sent.
+
+    For the implicit grant the ``state`` parameter is the only thing tying the
+    response to this process, so a callback that omits it entirely is treated
+    the same as one that gets it wrong: anything able to reach the loopback
+    port could otherwise hand us an attacker's token.  Only the pasted bare
+    code of :class:`ManualPasteFlow` - which carries no parameters at all - is
+    allowed through without one.
+    """
+
     if params.get("error"):
         raise AuthFlowError(
             _error_message(dict(params), 400, "authorization"),
             payload=dict(params),
         )
     returned_state = params.get("state")
-    if returned_state is not None and not secrets.compare_digest(returned_state, state):
+    if returned_state is None:
+        if require_state:
+            raise AuthFlowError("the authorization response carried no state, discarding it")
+        return
+    # compare_digest refuses non-ASCII str operands, so compare the bytes.
+    if not secrets.compare_digest(returned_state.encode("utf-8"), state.encode("utf-8")):
         raise AuthFlowError("authorization state mismatch, discarding the response")
 
 
@@ -416,8 +431,10 @@ class ManualPasteFlow(Flow):
         if not answer:
             raise AuthFlowError("no redirect URL was pasted")
 
-        params = parse_redirect(answer) if "=" in answer else {"code": answer}
-        _check_callback(params, authorization.state)
+        pasted_url = "=" in answer
+        params = parse_redirect(answer) if pasted_url else {"code": answer}
+        # A bare code carries no state to check; a pasted redirect URL must have one.
+        _check_callback(params, authorization.state, require_state=pasted_url)
         code = params.get("code")
         if not code:
             raise AuthFlowError("the pasted redirect URL carried no code")

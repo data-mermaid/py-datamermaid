@@ -138,3 +138,46 @@ def test_without_a_cached_token_the_client_stays_anonymous():
 def test_the_cache_lookup_can_be_switched_off():
     cached(TokenSet(access_token=make_jwt(expires_in=3600)))
     assert isinstance(resolve_auth(cache=False), AnonymousAuth)
+
+
+@pytest.fixture
+def _no_prompt(monkeypatch):
+    """An ordinary request must never stop to ask the user anything."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("an ordinary request tried to start an interactive login")
+
+    monkeypatch.setattr("builtins.input", refuse)
+
+
+@respx.mock
+def test_a_stale_cached_token_is_not_adopted(_no_prompt):
+    # Expired and not refreshable: picking it up would turn the next data call
+    # into a browser prompt nobody asked for.
+    cached(TokenSet(access_token=make_jwt(expires_in=-60)))
+    assert isinstance(resolve_auth(), AnonymousAuth)
+
+    route = respx.get(f"{BASE_URL}me/").mock(return_value=httpx.Response(401, json={}))
+    with MermaidClient() as client, pytest.raises(AuthenticationError):
+        client.me()
+
+    assert "Authorization" not in route.calls.last.request.headers
+
+
+def test_an_adopted_cached_login_never_prompts():
+    cached(TokenSet(access_token=make_jwt(expires_in=3600)))
+    auth = resolve_auth()
+    assert isinstance(auth, OAuth)
+    assert auth.interactive is False
+
+
+@respx.mock
+def test_an_adopted_token_that_cannot_be_renewed_fails_cleanly(_no_prompt):
+    from datamermaid import AuthFlowError
+
+    cached(TokenSet(access_token=make_jwt(expires_in=-60), refresh_token="stale"))
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(403, json={"error": "invalid_grant"}))
+    respx.get(f"{BASE_URL}me/").mock(return_value=httpx.Response(200, json=ME))
+
+    with MermaidClient() as client, pytest.raises(AuthFlowError):
+        client.me()

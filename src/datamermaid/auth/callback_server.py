@@ -108,7 +108,8 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         parsed = urlsplit(self.path)
         params = dict(parse_qsl(parsed.query, keep_blank_values=True))
 
-        if parsed.path == FRAGMENT_PATH:
+        if parsed.path == FRAGMENT_PATH and server.mode == "fragment":
+            # Only the implicit grant bounces its fragment back here.
             server.result = params
             self._respond(200, _DONE_PAGE)
         elif parsed.path != server.callback_path:

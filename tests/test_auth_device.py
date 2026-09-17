@@ -215,12 +215,16 @@ def test_auto_falls_back_to_pasting_when_the_device_grant_is_disabled(monkeypatc
     respx.post(DEVICE_CODE_URL).mock(
         return_value=httpx.Response(403, json={"error": "unauthorized_client"})
     )
-    answers = iter(["http://localhost:1410/?code=pasted-code"])
     respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json=TOKEN_RESPONSE))
+
+    def answer(_message):
+        # The user copies the address the browser could not load, state and all.
+        state = parse_qs(urlsplit(recorder.printed[1].strip()).query)["state"][0]
+        return f"http://localhost:1410/?code=pasted-code&state={state}"
 
     auth = OAuth(
         printer=recorder.write,
-        prompt=lambda _message: next(answers),
+        prompt=answer,
         cache=False,
     )
     assert isinstance(auth._select_flow(auth._context(httpx.Client())), ManualPasteFlow)
@@ -330,3 +334,9 @@ def test_the_redirect_port_can_be_pinned():
     with pytest.raises(AuthFlowError):
         paste_auth(recorder, [""], redirect_port=9999).login()
     assert "localhost%3A9999" in recorder.text
+
+
+def test_a_pasted_url_without_a_state_is_rejected():
+    recorder = Recorder()
+    with pytest.raises(AuthFlowError, match="no state"):
+        paste_auth(recorder, ["http://localhost:1410/?code=c"]).login()

@@ -8,8 +8,10 @@ tenants can be logged into side by side.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -32,6 +34,31 @@ def default_cache_path() -> Path:
     root = os.environ.get("XDG_CONFIG_HOME", "").strip()
     base = Path(root) if root else Path.home() / ".config"
     return base / "datamermaid" / "tokens.json"
+
+
+def _seconds(value: Any) -> float | None:
+    """``value`` as a number of seconds, accepting the strings a fragment carries.
+
+    The implicit grant's parameters come out of ``parse_qsl``, so its
+    ``expires_in`` is ``"3600"`` rather than ``3600``.
+    """
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _chmod(path: Path, mode: int) -> None:
+    # A directory we do not own is not ours to tighten, and not worth failing over.
+    with contextlib.suppress(OSError):
+        os.chmod(path, mode)
 
 
 @dataclass(frozen=True)
@@ -61,9 +88,9 @@ class TokenSet:
             raise ValueError("token response did not contain an access_token")
 
         expires_at: float | None = None
-        expires_in = payload.get("expires_in")
-        if isinstance(expires_in, (int, float)) and not isinstance(expires_in, bool):
-            expires_at = (time.time() if now is None else now) + float(expires_in)
+        expires_in = _seconds(payload.get("expires_in"))
+        if expires_in is not None:
+            expires_at = (time.time() if now is None else now) + expires_in
 
         def optional(key: str) -> str | None:
             value = payload.get(key)
@@ -156,14 +183,26 @@ class TokenCache:
         return entries if isinstance(entries, dict) else {}
 
     def _write(self, entries: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=CACHE_DIR_MODE)
+        directory = self.path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        # mkdir's mode= is masked by the umask and does nothing to a directory
+        # that already exists, so set the permissions explicitly.
+        _chmod(directory, CACHE_DIR_MODE)
+
         payload = json.dumps({"version": CACHE_VERSION, "tokens": entries}, indent=2)
-        # O_CREAT with an explicit mode never widens permissions on creation;
-        # chmod afterwards fixes a file that already existed.
-        descriptor = os.open(self.path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, CACHE_FILE_MODE)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-        os.chmod(self.path, CACHE_FILE_MODE)
+        # Write a private temporary file beside the target and rename it into
+        # place: a crash or a concurrent reader never sees half a cache, and
+        # the rename also tightens the permissions of a pre-existing file.
+        descriptor, name = tempfile.mkstemp(dir=directory, prefix=".tokens-", suffix=".json")
+        temporary = Path(name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            os.chmod(temporary, CACHE_FILE_MODE)
+            os.replace(temporary, self.path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
     def load(self, key: str) -> TokenSet | None:
         """The cached tokens for ``key``, or ``None``."""

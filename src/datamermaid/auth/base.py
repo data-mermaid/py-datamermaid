@@ -138,11 +138,21 @@ def resolve_auth(
 def _cached_oauth(*, env: bool) -> Auth | None:
     """An :class:`~datamermaid.auth.oauth.OAuth` bound to cached tokens, if any.
 
+    Only a token that can still be used without asking the user anything
+    counts: credentials picked up implicitly must never turn an ordinary data
+    call into a browser prompt, so the login is left for the caller to run.
+    Hence ``interactive=False`` as well, in case the token expires mid-session.
+
     Imported late: the OAuth machinery pulls in the flows, and nothing here
     needs them until someone has actually logged in.
     """
 
     from .oauth import OAuth
 
-    oauth = OAuth(env=env)
-    return oauth if oauth.tokens is not None else None
+    oauth = OAuth(env=env, interactive=False)
+    tokens = oauth.tokens
+    if tokens is None:
+        return None
+    if tokens.refresh_token is None and tokens.is_expired():
+        return None
+    return oauth

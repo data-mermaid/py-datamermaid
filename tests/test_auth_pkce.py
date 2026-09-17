@@ -316,3 +316,22 @@ def test_repr_does_not_leak_the_token(tmp_path):
     auth.access_token()
     assert "supersecret" not in repr(auth)
     assert "authenticated=True" in repr(auth)
+
+
+def test_a_redirect_without_a_state_is_rejected():
+    server = FakeServer({"code": "the-code"})
+    recorder = Recorder()
+    recorder.opener = recorder.open
+
+    with pytest.raises(AuthFlowError, match="no state"):
+        pkce_auth(server, recorder).login()
+
+
+def test_a_non_ascii_state_is_a_mismatch_rather_than_a_crash():
+    # secrets.compare_digest refuses non-ASCII str operands.
+    server = FakeServer({"code": "the-code", "state": "staéte"})
+    recorder = Recorder()
+    recorder.opener = recorder.open
+
+    with pytest.raises(AuthFlowError, match="state mismatch"):
+        pkce_auth(server, recorder).login()

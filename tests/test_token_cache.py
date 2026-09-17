@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
+
 from datamermaid.auth import TokenCache, TokenSet, default_cache_path
 from datamermaid.auth.jwt import decode_payload, token_expires_at
 from datamermaid.auth.token_cache import CACHE_FILE_MODE
@@ -157,3 +159,41 @@ def test_opaque_tokens_decode_to_nothing():
     assert decode_payload("not-a-jwt") == {}
     assert decode_payload("a.b.c") == {}
     assert token_expires_at("not-a-jwt") is None
+
+
+def test_expires_in_may_arrive_as_a_string(tmp_path):
+    # The implicit flow parses its parameters out of a URL fragment, so every
+    # value reaches TokenSet as a string.
+    tokens = TokenSet.from_response({"access_token": "opaque", "expires_in": "3600"}, now=0.0)
+    assert tokens.expires_at == 3600.0
+    assert TokenSet.from_response({"access_token": "a", "expires_in": "soon"}).expires_at is None
+
+
+def test_the_cache_directory_is_only_readable_by_the_owner(tmp_path):
+    directory = tmp_path / "datamermaid"
+    directory.mkdir(mode=0o755)
+    cache = TokenCache(directory / "tokens.json")
+    cache.save(KEY, TokenSet(access_token="a"))
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_saving_leaves_no_temporary_files_behind(tmp_path):
+    cache = TokenCache(tmp_path / "tokens.json")
+    cache.save(KEY, TokenSet(access_token="a"))
+    cache.save("other", TokenSet(access_token="b"))
+    assert [path.name for path in tmp_path.iterdir()] == ["tokens.json"]
+
+
+def test_a_failed_save_leaves_the_previous_cache_intact(tmp_path, monkeypatch):
+    cache = TokenCache(tmp_path / "tokens.json")
+    cache.save(KEY, TokenSet(access_token="first"))
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("os.replace", fail)
+    with pytest.raises(OSError):
+        cache.save(KEY, TokenSet(access_token="second"))
+
+    assert cache.load(KEY).access_token == "first"
+    assert [path.name for path in tmp_path.iterdir()] == ["tokens.json"]

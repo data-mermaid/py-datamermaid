@@ -216,3 +216,26 @@ def test_a_flow_timeout_is_a_login_failure():
 
     assert issubclass(AuthTimeoutError, AuthFlowError)
     assert issubclass(AuthFlowError, MermaidError)
+
+
+def test_a_callback_without_a_state_is_rejected():
+    # The fragment is the only thing the implicit grant gets back, so a
+    # response missing the state could have come from anyone who reached the
+    # loopback port.
+    server = FakeServer({"access_token": "injected"})
+    recorder = Recorder()
+    recorder.opener = recorder.open
+
+    with pytest.raises(AuthFlowError, match="no state"):
+        implicit_auth(server, recorder, cache=False).login()
+
+
+def test_the_fragment_path_is_ignored_outside_the_implicit_flow():
+    with LoopbackCallbackServer(timeout=5) as server:
+        params, bodies = drive(
+            server,
+            [f"{FRAGMENT_PATH}?access_token=injected", "/?code=abc&state=xyz"],
+        )
+
+    assert "Nothing to do here" in bodies[0]
+    assert params == {"code": "abc", "state": "xyz"}

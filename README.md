@@ -131,7 +131,10 @@ project.to_dict()  # declared fields plus extras, one flat row
 
 Credentials are picked in this order: an explicit `auth=`, then `api_key=`,
 then `MERMAID_API_KEY`, then a token left behind by `datamermaid.login()`,
-then anonymous access.
+then anonymous access. A cached token is only picked up implicitly while it is
+still usable (unexpired, or refreshable without asking you anything): an
+ordinary data call never opens a browser on its own, so a stale login leaves
+the client anonymous until you run `datamermaid.login()` again.
 
 ### Signing in without an API key
 
@@ -190,6 +193,8 @@ kept per tenant/client/audience, so the production and development tenants can
 be logged in to side by side. Expiry is read from the access token's `exp`
 claim (decoded, never verified locally) with a 60 second margin; an expired
 token is refreshed silently, and only a failed refresh prompts a new login.
+The file is written by rename, so an interrupted save never truncates the
+tokens of the tenants it was not touching.
 
 Pass `cache=False` to keep tokens in memory only, or `cache="/path/to.json"`
 to move the file.
