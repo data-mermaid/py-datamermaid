@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -11,7 +12,9 @@ import respx
 from datamermaid.auth import OAuth, parse_fragment
 from datamermaid.auth.callback_server import (
     FRAGMENT_PATH,
+    HANDLER_TIMEOUT,
     LoopbackCallbackServer,
+    _CallbackHandler,
     parse_redirect,
 )
 from datamermaid.exceptions import AuthFlowError, AuthTimeoutError
@@ -204,6 +207,23 @@ def test_waiting_gives_up_after_the_timeout():
         pytest.raises(AuthTimeoutError, match="timed out"),
     ):
         server.wait()
+
+
+def test_an_idle_connection_cannot_block_the_redirect(monkeypatch):
+    # The server handles one connection at a time, so a peer that connects
+    # and never sends a request would hold the login open for as long as it
+    # liked if the accepted socket had no read timeout of its own.
+    assert _CallbackHandler.timeout == HANDLER_TIMEOUT > 0
+    monkeypatch.setattr(_CallbackHandler, "timeout", 0.2)
+
+    with LoopbackCallbackServer(timeout=5) as server:
+        idle = socket.create_connection(("127.0.0.1", server.port))
+        try:
+            params, _ = drive(server, ["/?code=abc&state=xyz"])
+        finally:
+            idle.close()
+
+    assert params == {"code": "abc", "state": "xyz"}
 
 
 def test_the_redirect_host_and_port_can_be_pinned():

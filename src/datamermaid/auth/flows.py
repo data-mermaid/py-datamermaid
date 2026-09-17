@@ -64,11 +64,16 @@ def code_challenge(verifier: str) -> str:
 
 
 def open_browser(url: str) -> bool:
-    """Open ``url`` in the system browser, reporting whether that worked."""
+    """Open ``url`` in the system browser, reporting whether that worked.
+
+    Only the failures a browser launch can legitimately produce are caught:
+    a broader ``except`` would also swallow the test suite's guard against
+    opening a real browser.
+    """
 
     try:
         return webbrowser.open(url)
-    except Exception:  # pragma: no cover - platform dependent
+    except (OSError, webbrowser.Error):  # pragma: no cover - platform dependent
         return False
 
 

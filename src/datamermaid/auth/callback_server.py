@@ -18,16 +18,31 @@ from urllib.parse import parse_qsl, urlsplit
 
 from ..exceptions import AuthTimeoutError
 
-__all__ = ["FRAGMENT_PATH", "CallbackMode", "LoopbackCallbackServer", "parse_fragment"]
+__all__ = [
+    "FRAGMENT_PATH",
+    "HANDLER_TIMEOUT",
+    "CallbackMode",
+    "LoopbackCallbackServer",
+    "parse_fragment",
+]
 
 CallbackMode = Literal["query", "fragment"]
 
 #: Where the implicit-flow page re-posts the fragment it was handed.
 FRAGMENT_PATH = "/fragment"
 
+#: The socket only ever listens on the loopback interface.  RFC 8252 section
+#: 7.3 prefers the literal IP over the ``localhost`` name advertised in the
+#: redirect URI; the name is kept as the default there because Auth0 matches
+#: callback URLs literally and the registered ones use it.  Pass
+#: ``redirect_host="127.0.0.1"`` to advertise the literal address instead.
 BIND_HOST = "127.0.0.1"
 DEFAULT_REDIRECT_HOST = "localhost"
 DEFAULT_TIMEOUT = 300.0
+#: How long a single accepted connection may stay silent.  Without it a peer
+#: that connects and never sends a request would block the single-threaded
+#: server - and so the whole login - for as long as it stays open.
+HANDLER_TIMEOUT = 30.0
 _POLL_INTERVAL = 0.5
 
 _PAGE = """<!doctype html>
@@ -102,6 +117,10 @@ class _CallbackServer(HTTPServer):
 class _CallbackHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
     server_version = "datamermaid"
+    #: Read timeout for the accepted socket; see :data:`HANDLER_TIMEOUT`.
+    #: ``handle_one_request`` turns the resulting ``TimeoutError`` into a
+    #: closed connection, and the wait loop moves on to the next caller.
+    timeout = HANDLER_TIMEOUT
 
     def do_GET(self) -> None:
         server = cast("_CallbackServer", self.server)

@@ -9,7 +9,7 @@ import respx
 
 import datamermaid
 from datamermaid.auth import OAuth, code_challenge, generate_code_verifier
-from datamermaid.auth.flows import PkceFlow
+from datamermaid.auth.flows import PkceFlow, open_browser
 from datamermaid.auth.token_cache import CACHE_FILE_MODE, default_cache_path
 from datamermaid.exceptions import AuthFlowError
 
@@ -335,3 +335,31 @@ def test_a_non_ascii_state_is_a_mismatch_rather_than_a_crash():
 
     with pytest.raises(AuthFlowError, match="state mismatch"):
         pkce_auth(server, recorder).login()
+
+
+# -- opening the browser --------------------------------------------------
+
+
+def test_a_browser_that_cannot_start_is_reported_as_not_opened(monkeypatch):
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", _raise(webbrowser.Error("no runnable browser")))
+    assert open_browser("https://example.test/") is False
+
+    monkeypatch.setattr(webbrowser, "open", _raise(OSError("display refused")))
+    assert open_browser("https://example.test/") is False
+
+
+def test_open_browser_does_not_swallow_the_test_suite_guard(monkeypatch):
+    # conftest replaces webbrowser.open with a guard that raises; catching it
+    # here would turn "this test forgot to inject a browser" into a silent
+    # hang on a login nobody can complete.
+    with pytest.raises(AssertionError, match="tried to open a browser"):
+        open_browser("https://example.test/")
+
+
+def _raise(exc):
+    def fail(*args, **kwargs):
+        raise exc
+
+    return fail
