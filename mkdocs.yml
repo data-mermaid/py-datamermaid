@@ -1,0 +1,113 @@
+site_name: datamermaid
+site_description: Python SDK for the MERMAID coral reef monitoring API
+site_url: https://data-mermaid.github.io/py-datamermaid/
+repo_url: https://github.com/data-mermaid/py-datamermaid
+repo_name: data-mermaid/py-datamermaid
+edit_uri: edit/main/docs/
+copyright: MIT licensed. MERMAID is a project of WCS, WWF, SparkGeo and WPS.
+
+docs_dir: docs
+site_dir: site
+
+# `--strict` turns these into build failures, which is how a renamed page or a
+# cross-reference to a symbol that no longer exists is caught in CI.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - content.action.edit
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          # src layout: the package is not importable from the repository root.
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            # Hide privates, and the single-letter TypeVars the generic
+            # resources are parameterised by: they document nothing a reader
+            # of the rendered signatures does not already see.
+            filters: ["!^_", "!^[A-Z]$"]
+            heading_level: 3
+            inherited_members: true
+            members_order: source
+            merge_init_into_class: true
+            relative_crossrefs: true
+            separate_signature: true
+            show_if_no_docstring: true
+            show_root_full_path: false
+            show_root_heading: true
+            show_signature_annotations: true
+            show_source: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            signature_crossrefs: true
+            summary: true
+            unwrap_annotated: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Guides:
+      - Authentication: authentication.md
+      - Working with data: data.md
+      - Project data: projects.md
+      - Examples: examples.md
+  - API reference:
+      - Overview: reference/index.md
+      - Client: reference/client.md
+      - Authentication: reference/auth.md
+      - Resources: reference/resources.md
+      - Models: reference/models.md
+      - Pagination: reference/pagination.md
+      - Exceptions: reference/exceptions.md

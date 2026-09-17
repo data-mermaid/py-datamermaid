@@ -30,7 +30,7 @@ class BaseResource:
     """Anything reachable through the client: a path and a way to request it.
 
     Endpoints whose responses are not lists of models (``/choices/``) extend
-    this directly; everything else extends :class:`Resource`.
+    this directly; everything else extends [`Resource`][datamermaid.resources.base.Resource].
     """
 
     #: Endpoint path relative to the API root, e.g. ``"projects/"``.
@@ -56,9 +56,9 @@ class BaseResource:
 class Resource(BaseResource, Generic[M]):
     """Base class for endpoints returning records of one model.
 
-    Subclasses set :attr:`path` and :attr:`model` and expose whatever public
-    methods make sense for the endpoint, built on :meth:`_list` and
-    :meth:`_get`.
+    Subclasses set [`path`][datamermaid.resources.base.Resource.path] and
+    [`model`][datamermaid.resources.base.Resource.model] and expose whatever public
+    methods make sense for the endpoint, built on ``_list`` and ``_get``.
     """
 
     #: Model the endpoint's records are parsed into.
@@ -68,7 +68,10 @@ class Resource(BaseResource, Generic[M]):
         return self.model.from_api(data)
 
     def _page(self, data: Any) -> Page[M]:
-        """Turn a DRF list response (or a bare JSON array) into a :class:`Page`."""
+        """Turn a DRF list response (or a bare JSON array) into one page.
+
+        See [`Page`][datamermaid.pagination.Page].
+        """
 
         if isinstance(data, list):
             return Page(items=[self._parse(item) for item in data], count=len(data))
@@ -152,7 +155,8 @@ class ReadOnlyResource(Resource[M]):
     def get(self, record_id: str, **params: Any) -> M:
         """Fetch a single record by id.
 
-        Keyword arguments become query parameters, as for :meth:`list`.
+        Keyword arguments become query parameters, as for
+        [`list`][datamermaid.resources.base.ReadOnlyResource.list].
         """
 
         query = {key: value for key, value in params.items() if value is not None}

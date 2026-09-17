@@ -1,0 +1,3 @@
+# Models
+
+::: datamermaid.models

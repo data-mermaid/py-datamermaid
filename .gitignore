@@ -21,3 +21,6 @@ htmlcov/
 
 # RepoMix generated context (see README "AI-friendly repo context")
 repomix-output.*
+
+# MkDocs build output (see README "Documentation")
+site/

@@ -1,4 +1,4 @@
-"""Endpoint wrappers exposed through :class:`~datamermaid.client.MermaidClient`."""
+"""Endpoint wrappers exposed through [`MermaidClient`][datamermaid.client.MermaidClient]."""
 
 from __future__ import annotations
 

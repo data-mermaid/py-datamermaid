@@ -2,6 +2,11 @@
 
 Python SDK for the [MERMAID](https://datamermaid.org/) coral reef monitoring API.
 
+**[Documentation](https://data-mermaid.github.io/py-datamermaid/)** -
+[Quickstart](https://data-mermaid.github.io/py-datamermaid/#quickstart) -
+[Authentication](https://data-mermaid.github.io/py-datamermaid/authentication/) -
+[API reference](https://data-mermaid.github.io/py-datamermaid/reference/)
+
 - Typed models with a lossless catch-all for fields the API adds later
 - Lazy pagination: pages are fetched only as you consume them
 - One-line export to a pandas DataFrame
@@ -441,6 +446,22 @@ artifact - regenerate it rather than committing it.
 CI regenerates it on every push to `main` and uploads it as the
 `repomix-output` artifact of the *RepoMix* workflow run, downloadable from the
 Actions tab.
+
+## Documentation
+
+The full guides and the generated API reference live at
+<https://data-mermaid.github.io/py-datamermaid/>, built with
+[MkDocs](https://www.mkdocs.org/) from [`docs/`](docs/) and published by the
+*Docs* workflow on every push to `main`. To work on them locally:
+
+```bash
+uv run --group docs mkdocs serve          # live-reloading preview on :8000
+uv run --group docs mkdocs build --strict # what CI runs; warnings are failures
+```
+
+`tests/test_docs.py` resolves every code block on the site against the real SDK
+objects, so a renamed attribute fails the ordinary test run rather than shipping
+as confident-sounding prose.
 
 ## Development
 

@@ -5,7 +5,7 @@ a bare JSON array of ``{"name": ..., "data": [...]}`` objects, one per choice
 set (``countries``, ``reeftypes``, ``managementparties``, ...).  The detail
 route, ``/choices/<name>/``, returns a single one of those objects.  So this
 wrapper hands back plain dictionaries rather than models in a
-:class:`~datamermaid.pagination.PaginatedList`.
+[`PaginatedList`][datamermaid.pagination.PaginatedList].
 """
 
 from __future__ import annotations

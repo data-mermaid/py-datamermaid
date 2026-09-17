@@ -40,7 +40,7 @@ DEFAULT_BASE_URL = "https://api.datamermaid.org/v1/"
 DEV_BASE_URL = "https://dev-api.datamermaid.org/v1/"
 BASE_URL_ENV_VAR = "MERMAID_API_URL"
 
-#: A resource wrapper cached on the client, for :meth:`MermaidClient._resource`.
+#: A resource wrapper cached on the client, for `MermaidClient._resource`.
 R = TypeVar("R", bound="BaseResource")
 
 DEFAULT_TIMEOUT = 30.0
@@ -65,17 +65,61 @@ def resolve_base_url(base_url: str | None = None) -> str:
 class MermaidClient:
     """Synchronous client for the MERMAID API.
 
-    Example:
-        >>> with MermaidClient(api_key="mmd_abc.def") as client:  # doctest: +SKIP
-        ...     me = client.me()
-        ...     for project in client.projects.list():
-        ...         print(project.name)
+    Owns the base URL, the timeouts, the ``User-Agent``, the retry-with-backoff
+    policy and the JSON decoding.  Credentials are never inspected here: the
+    client only ever asks an [`Auth`][datamermaid.auth.base.Auth] to stamp an
+    outgoing request.
 
-    Reference data needs no credentials, and each endpoint is a property
-    returning a lazy, filterable list:
-        >>> with MermaidClient() as client:  # doctest: +SKIP
-        ...     species = client.fish_species.list(genus=genus_id)
-        ...     reef_types = client.choices("reeftypes")
+    Each endpoint group is a property returning a wrapper whose ``list()`` gives
+    a lazy [`PaginatedList`][datamermaid.pagination.PaginatedList].  Reference data needs
+    no credentials; ``/me/``, ``/projects/``, ``/sites/`` and ``/managements/``
+    do.
+
+    Use it as a context manager so the connection pool is closed.
+
+    Args:
+        auth: Credential provider.  Mutually exclusive with ``api_key``.
+        api_key: A MERMAID API key, ``mmd_<key_id>.<secret>``.  Defaults to
+            ``MERMAID_API_KEY``, then to tokens left by
+            [`datamermaid.login`][datamermaid.auth.oauth.login], then to anonymous access.
+        base_url: API root.  Defaults to ``MERMAID_API_URL``, then to
+            [`DEFAULT_BASE_URL`][datamermaid.client.DEFAULT_BASE_URL].  A trailing slash
+            is added if missing.
+        timeout: Seconds, or an ``httpx.Timeout`` for per-phase control.
+        max_retries: Extra attempts after a 429 or 5xx.  ``0`` disables retrying.
+        backoff_factor: Base delay of the exponential backoff, in seconds.
+            A ``Retry-After`` header wins over it.
+        headers: Extra headers sent with every request.
+        user_agent: Overrides [`..default_user_agent`][].
+        transport: An ``httpx`` transport, mainly for tests.
+
+    Raises:
+        ValueError: If ``max_retries`` is negative, or both ``auth`` and
+            ``api_key`` are given.
+
+    Attributes:
+        auth: The credential provider in use.
+        base_url: The resolved API root, always ending in ``/``.
+        max_retries: Extra attempts made after a retryable status code.
+        backoff_factor: Base delay of the exponential backoff, in seconds.
+
+    Example:
+        ```python
+        from datamermaid import MermaidClient
+
+        with MermaidClient(api_key="mmd_abc.def") as client:
+            me = client.me()
+            for project in client.projects.list():
+                print(project.name)
+        ```
+
+        Reference data is public, so it needs no credentials at all:
+
+        ```python
+        with MermaidClient() as client:
+            species = client.fish_species.list(genus=genus_id)
+            reef_types = client.choices("reeftypes")
+        ```
     """
 
     def __init__(
@@ -279,8 +323,17 @@ class MermaidClient:
         Unlike the list endpoints this one is not paginated, so it returns
         plain dictionaries rather than a ``PaginatedList`` of models.
 
-            >>> client.choices()["reeftypes"]  # doctest: +SKIP
+        Args:
+            name: A single choice set to fetch.  Omit it for all of them.
+
+        Returns:
+            Every choice set keyed by name, or one set's rows.
+
+        Example:
+            ```pycon
+            >>> client.choices()["reeftypes"]
             [{'id': '...', 'name': 'atoll', 'updated_on': '...'}, ...]
+            ```
         """
 
         from .resources.choices import ChoicesResource

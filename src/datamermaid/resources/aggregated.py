@@ -5,16 +5,20 @@ observation, one per sample unit, and one per sample event, each already joined
 to its site, management regime and project.  These are the routes analysts pull
 into a DataFrame:
 
-    >>> project = client.projects(project_id)  # doctest: +SKIP
-    >>> project.beltfishes.observations(sample_date_after="2018-01-01").to_df()  # doctest: +SKIP
-    >>> project.benthicpits.sample_events().to_df()  # doctest: +SKIP
+```python
+project = client.projects(project_id)
+project.beltfishes.observations(sample_date_after="2018-01-01").to_df()
+project.benthicpits.sample_events().to_df()
+```
 
 The seven families differ only in their route and their columns, so each is an
-:class:`AggregatedViewFamily` describing the former, and all of them share one
-:class:`AggregatedFamilyResource` and one light
-:class:`~datamermaid.models.AggregatedRecord`, whose declared fields are the few
-every view has in common.  Bleaching is the exception: it publishes two
-observation views, so it gets :class:`BleachingQCFamilyResource`.
+[`.AggregatedViewFamily`][]
+describing the former, and all of them share one
+[`.AggregatedFamilyResource`][]
+and one light [`AggregatedRecord`][datamermaid.models.AggregatedRecord], whose declared
+fields are the few every view has in common.  Bleaching is the exception: it publishes
+two observation views, so it gets
+[`.BleachingQCFamilyResource`][].
 
 Sub-route names follow ``mermaid-api``'s ``src/api/urls.py`` (dev branch).
 """
@@ -50,8 +54,9 @@ __all__ = [
 class AggregatedViewFamily:
     """One protocol's aggregated views, as route segments under a project.
 
-    :attr:`family` is both the first segment of the route and the attribute the
-    :class:`~datamermaid.resources.project_context.ProjectContext` exposes it
+    [`.family`][] is both the
+    first segment of the route and the attribute the
+    [`ProjectContext`][datamermaid.resources.project_context.ProjectContext] exposes it
     as, e.g. ``beltfishes`` for ``/projects/{id}/beltfishes/``.
     """
 
@@ -87,8 +92,8 @@ class AggregatedFamilyResource(Resource[AggregatedRecord]):
     """One protocol's aggregated views for one project.
 
     Each method returns the same lazy
-    :class:`~datamermaid.pagination.PaginatedList` as every other list route,
-    over :class:`~datamermaid.models.AggregatedRecord` rows.  Keyword arguments
+    [`PaginatedList`][datamermaid.pagination.PaginatedList] as every other list route,
+    over [`AggregatedRecord`][datamermaid.models.AggregatedRecord] rows.  Keyword arguments
     become query parameters, so the API's own filters pass straight through:
     ``sample_date_before`` / ``sample_date_after``, ``depth_min`` / ``depth_max``,
     ``site_id``, ``management_id``, ``label``, ``observers``, the protocol's own
@@ -128,9 +133,9 @@ class AggregatedFamilyResource(Resource[AggregatedRecord]):
 class BleachingQCFamilyResource(AggregatedFamilyResource):
     """The bleaching quadrat collections, which publish two observation views.
 
-    :meth:`colonies_bleached` is the per-colony view and
-    :meth:`quadrat_benthic_percent` the per-quadrat benthic cover view;
-    :meth:`observations` is an alias of the former, so the family still answers
+    [`.colonies_bleached`][] is the per-colony view and
+    [`.quadrat_benthic_percent`][] the per-quadrat benthic cover view;
+    [`.observations`][] is an alias of the former, so the family still answers
     the same three methods as its siblings.
     """
 
@@ -145,7 +150,7 @@ class BleachingQCFamilyResource(AggregatedFamilyResource):
         return self._view(self.family.views["quadrat_benthic_percent"], filters)
 
     def observations(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
-        """The colonies bleached view; see :meth:`colonies_bleached`."""
+        """The colonies bleached view; see [`..colonies_bleached`][]."""
 
         return self.colonies_bleached(**filters)
 

@@ -2,7 +2,7 @@
 
 Every endpoint here is a read-only, paginated list with a ``/<id>/`` detail
 route, so each wrapper is just a path and a model on top of
-:class:`~datamermaid.resources.base.ReadOnlyResource`.  The filters named in
+[`ReadOnlyResource`][datamermaid.resources.base.ReadOnlyResource].  The filters named in
 each docstring are the ones the API declares; any other keyword argument is
 forwarded as a query parameter too, as are ``limit``, ``search``, ``ordering``
 and ``fields``.
@@ -155,8 +155,8 @@ class InvertSpeciesResource(ReadOnlyResource[InvertSpecies]):
 class SummarySampleEventsResource(ReadOnlyResource[SummarySampleEvent]):
     """Public per-sample-event summaries (``/summarysampleevents/``).
 
-    Records are keyed by :attr:`~datamermaid.models.SummarySampleEvent.sample_event_id`,
-    which is also what :meth:`~datamermaid.resources.base.ReadOnlyResource.get`
+    Records are keyed by [`sample_event_id`][datamermaid.models.SummarySampleEvent.sample_event_id],
+    which is also what [`get`][datamermaid.resources.base.ReadOnlyResource.get]
     takes.  Filters: ``project_id``, ``project_name``, ``project_admins``,
     ``sample_date`` (as a range, ``sample_date_after`` / ``sample_date_before``)
     and the seven ``data_policy_*`` fields.

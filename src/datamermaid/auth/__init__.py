@@ -1,7 +1,7 @@
-"""Authentication strategies for :class:`~datamermaid.client.MermaidClient`.
+"""Authentication strategies for [`MermaidClient`][datamermaid.client.MermaidClient].
 
 The client never inspects credentials directly: it only ever asks an
-:class:`Auth` instance to stamp an outgoing request.  That seam is what lets
+[`Auth`][datamermaid.auth.base.Auth] instance to stamp an outgoing request.  That seam is what lets
 an API key, an OAuth login and anonymous access be swapped for one another
 without the client knowing the difference.
 """

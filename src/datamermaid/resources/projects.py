@@ -21,12 +21,16 @@ class ProjectsResource(ReadOnlyResource[Project]):
     of), ``name``, ``country``, ``tags``, ``status``.
 
     Calling the resource with a project id (or a
-    :class:`~datamermaid.models.Project`) returns a
-    :class:`~datamermaid.resources.project_context.ProjectContext`, the handle
-    on everything recorded under that project:
+    [`Project`][datamermaid.models.Project]) returns a
+    [`ProjectContext`][datamermaid.resources.project_context.ProjectContext], the handle
+    on everything recorded under that project.
 
-        >>> client.projects(project_id).sites.list()  # doctest: +SKIP
-        >>> client.projects(client.projects.get(project_id))  # doctest: +SKIP
+    Example:
+        ```python
+        client.projects.get(project_id)  # the project record itself
+        client.projects(project_id).sites.list()  # what is recorded under it
+        client.projects(client.projects.get(project_id))  # either works
+        ```
     """
 
     path = "projects/"
