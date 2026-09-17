@@ -106,6 +106,79 @@ project.beltfish_methods.list().to_df()
 
 All of these need credentials with access to the project.
 
+### Observation data
+
+The `*_methods` collections above are shaped for editing one survey at a time.
+For analysis the API also publishes each protocol denormalized, as flat rows
+with the site, management regime and project already joined in. That is the
+four-line path from a project id to a DataFrame:
+
+```python
+from datamermaid import MermaidClient
+
+with MermaidClient(api_key="mmd_abc.def") as client:
+    project = client.projects("d5491b25-4a5f-401b-a50f-bb80fd1df78f")
+    observations = project.beltfishes.observations(sample_date_after="2018-01-01").to_df()
+    observations[["site_name", "sample_date", "fish_taxon", "size", "count", "biomass_kgha"]]
+```
+
+Every family answers the same three methods, each a lazy `PaginatedList` of
+`AggregatedRecord` rows: `.observations()` (one row per observation),
+`.sample_units()` (one row per transect or quadrat collection, with that unit's
+aggregates) and `.sample_events()` (one row per site visit, averaged over its
+sample units).
+
+| Attribute | Observations | Sample units | Sample events |
+| --- | --- | --- | --- |
+| `project.beltfishes` | `beltfishes/obstransectbeltfishes/` | `beltfishes/sampleunits/` | `beltfishes/sampleevents/` |
+| `project.benthiclits` | `benthiclits/obstransectbenthiclits/` | `benthiclits/sampleunits/` | `benthiclits/sampleevents/` |
+| `project.benthicpits` | `benthicpits/obstransectbenthicpits/` | `benthicpits/sampleunits/` | `benthicpits/sampleevents/` |
+| `project.benthicpqts` | `benthicpqts/obstransectbenthicpqts/` | `benthicpqts/sampleunits/` | `benthicpqts/sampleevents/` |
+| `project.habitatcomplexities` | `habitatcomplexities/obshabitatcomplexities/` | `habitatcomplexities/sampleunits/` | `habitatcomplexities/sampleevents/` |
+| `project.bleachingqcs` | `bleachingqcs/obscoloniesbleacheds/` and `bleachingqcs/obsquadratbenthicpercents/` | `bleachingqcs/sampleunits/` | `bleachingqcs/sampleevents/` |
+| `project.beltinverts` | `beltinverts/obstransectbeltinverts/` | `beltinverts/sampleunits/` | `beltinverts/sampleevents/` |
+
+Bleaching records two kinds of observation, so it has two observation views,
+`.colonies_bleached()` and `.quadrat_benthic_percent()`; `.observations()` is an
+alias of the first.
+
+```python
+project.bleachingqcs.colonies_bleached().to_df()
+project.bleachingqcs.quadrat_benthic_percent().to_df()
+```
+
+Keyword arguments are the API's own query parameters: the shared filters
+(`sample_date_after`, `sample_date_before`, `site_id`, `site_name`,
+`management_id`, `country_name`, `depth_min`, `depth_max`, `label`,
+`observers`, ...), each protocol's own (`fish_family`, `benthic_category`,
+`biomass_kgha_min`, ...), and the parameters every list route understands
+(`limit`, `ordering`, `fields`):
+
+```python
+project.beltfishes.sample_events(
+    sample_date_after="2018-01-01",
+    site_name="Namena South",
+    ordering="sample_date",
+    limit=200,
+)
+```
+
+These rows are wide and their columns differ per protocol and per view, so
+`AggregatedRecord` declares only what every view shares (`id`, `project_id`,
+`project_name`, `site_id`, `site_name`, `sample_date`, `management_id`,
+`sample_event_id`) and keeps the rest in `extra`. `to_dict()` and `to_df()`
+flatten both, so each field the API sent is one DataFrame column:
+
+```python
+row = project.benthicpits.observations(limit=1)[0]
+row.site_name, row.sample_date  # declared
+row.extra["benthic_category"]  # protocol column, as the API sent it
+```
+
+The sample unit views carry no `id` (they report `sample_unit_ids` instead), so
+`row.id` is `None` on those. The `/csv/` and `/geojson/` variants of these
+routes are not wrapped; the SDK reads the JSON views only.
+
 ### Reference data and summaries
 
 Beyond `/projects/`, every top-level route is reachable as a client attribute

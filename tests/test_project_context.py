@@ -18,7 +18,7 @@ import respx
 from datamermaid import PaginatedList, Project, ProjectContext
 from datamermaid.exceptions import NotFoundError
 from datamermaid.models import Observer, SampleEvent
-from datamermaid.resources import PROJECT_RESOURCES
+from datamermaid.resources import AGGREGATED_FAMILIES, PROJECT_RESOURCES
 from datamermaid.resources.projects import ProjectsResource
 
 from .conftest import BASE_URL, PROJECT_ID, page, project_payload, project_scoped_payload
@@ -103,12 +103,17 @@ def test_resources_are_built_once_per_context(project, attribute, resource_class
 
 
 def test_the_registry_lists_every_collection_on_the_context(project):
-    """The context hand-writes its properties; they must match the registry."""
+    """The context hand-writes its properties; they must match the registry.
 
+    The aggregated views hang off the same context but are registered in
+    ``AGGREGATED_FAMILIES``; ``tests/test_aggregated_views.py`` covers those.
+    """
+
+    aggregated = {family.family for family in AGGREGATED_FAMILIES}
     exposed = {
         name: type(getattr(project, name))
         for name, attribute in vars(ProjectContext).items()
-        if isinstance(attribute, property)
+        if isinstance(attribute, property) and name not in aggregated
     }
     assert exposed == dict(PROJECT_RESOURCES)
 

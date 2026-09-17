@@ -209,3 +209,9 @@ def project_scoped_payload(attribute):
     """One project-scoped record, keyed by :class:`ProjectContext` attribute name."""
 
     return load_fixture("project_responses")[attribute]
+
+
+def aggregated_payload(view):
+    """One row from an aggregated view, keyed by the resource method name."""
+
+    return load_fixture("aggregated_responses")[view]

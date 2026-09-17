@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from .aggregated import (
+    AGGREGATED_FAMILIES,
+    AggregatedFamilyResource,
+    AggregatedViewFamily,
+    BleachingQCFamilyResource,
+)
 from .base import BaseResource, ReadOnlyResource, Resource
 from .choices import ChoicesResource
 from .me import MeResource
@@ -42,10 +48,14 @@ from .reference import (
 )
 
 __all__ = [
+    "AGGREGATED_FAMILIES",
     "PROJECT_RESOURCES",
     "REFERENCE_RESOURCES",
+    "AggregatedFamilyResource",
+    "AggregatedViewFamily",
     "BaseResource",
     "BenthicAttributesResource",
+    "BleachingQCFamilyResource",
     "ChoicesResource",
     "FishFamiliesResource",
     "FishGeneraResource",
