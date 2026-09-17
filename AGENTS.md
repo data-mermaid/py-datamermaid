@@ -102,6 +102,10 @@ CI (`.github/workflows/ci.yml`) runs ruff, mypy, and pytest on Python 3.10-3.13.
 - New endpoints: add a `Resource` subclass in `resources/` with `path` and
   `model`, and build on `_list()` / `_get()`. Expose it as a cached property on
   `MermaidClient`.
+- New project-scoped endpoints (`/projects/{id}/...`): add a `ProjectResource`
+  subclass in `resources/project_context.py` with `route` and `model`, a
+  property on `ProjectContext`, and an entry in `PROJECT_RESOURCES` (the
+  registry the tests check the properties against).
 - New models: subclass `APIModel`, declare optional fields with defaults, and use
   `field(metadata=_api_meta(...))` for renames or value converters. Never make a
   field required; the API may omit it.
