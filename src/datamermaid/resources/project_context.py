@@ -10,12 +10,16 @@ Each collection behaves exactly like a top-level one: a lazy, filterable
 :class:`~datamermaid.pagination.PaginatedList` from ``.list(**filters)`` and a
 single record from ``.get(id)``.  They differ only in their path, so each is a
 :class:`ProjectResource` declaring its route and model.
+
+The context also carries the aggregated views of
+:mod:`datamermaid.resources.aggregated` (``project.beltfishes.observations()``
+and its siblings), which are list-only and answer with flat rows rather than
+nested models.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeVar, cast
-from urllib.parse import quote
 
 from ..models import (
     APIModel,
@@ -35,7 +39,19 @@ from ..models import (
     SampleEvent,
     Site,
 )
-from .base import ReadOnlyResource
+from .aggregated import (
+    BELTFISHES,
+    BELTINVERTS,
+    BENTHICLITS,
+    BENTHICPITS,
+    BENTHICPQTS,
+    BLEACHINGQCS,
+    HABITATCOMPLEXITIES,
+    AggregatedFamilyResource,
+    AggregatedViewFamily,
+    BleachingQCFamilyResource,
+)
+from .base import ReadOnlyResource, project_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
@@ -64,16 +80,8 @@ __all__ = [
 M = TypeVar("M", bound=APIModel)
 #: A resource wrapper cached on a context, for :meth:`ProjectContext._resource`.
 R = TypeVar("R", bound="ProjectResource[Any]")
-
-
-def project_path(project_id: str, route: str) -> str:
-    """Compose ``projects/<project_id>/<route>``.
-
-    The id is percent-encoded, so a stray ``/`` or ``..`` in it cannot send the
-    request to a different endpoint.
-    """
-
-    return f"projects/{quote(project_id.strip('/'), safe='')}/{route}"
+#: An aggregated view family, for :meth:`ProjectContext._aggregated`.
+A = TypeVar("A", bound=AggregatedFamilyResource)
 
 
 class ProjectResource(ReadOnlyResource[M]):
@@ -246,6 +254,11 @@ class ProjectContext:
         >>> for site in project.sites.list():  # doctest: +SKIP
         ...     print(site.name)
 
+    The aggregated views of the seven protocols hang off the same handle, one
+    property per family:
+
+        >>> project.beltfishes.observations().to_df()  # doctest: +SKIP
+
     Nothing is requested when the context is built; each collection is a lazy
     list like every other endpoint in the SDK.
     """
@@ -258,6 +271,7 @@ class ProjectContext:
         self._client = client
         self.project_id = str(project_id).strip()
         self._resources: dict[type[Any], Any] = {}
+        self._families: dict[str, AggregatedFamilyResource] = {}
 
     def __repr__(self) -> str:
         return f"ProjectContext(project_id={self.project_id!r})"
@@ -270,6 +284,15 @@ class ProjectContext:
             resource = resource_class(self._client, self.project_id)
             self._resources[resource_class] = resource
         return cast("R", resource)
+
+    def _aggregated(self, family: AggregatedViewFamily, resource_class: type[A]) -> A:
+        """Return this context's single resource for one aggregated family."""
+
+        resource = self._families.get(family.family)
+        if resource is None:
+            resource = resource_class(self._client, self.project_id, family)
+            self._families[family.family] = resource
+        return cast("A", resource)
 
     @property
     def sites(self) -> ProjectSitesResource:
@@ -354,3 +377,54 @@ class ProjectContext:
         """Macroinvertebrate surveys, ``/projects/{id}/beltinverttransectmethods/``."""
 
         return self._resource(ProjectBeltInvertMethodsResource)
+
+    # -- aggregated views -------------------------------------------------
+    #
+    # The denormalized observation / sample unit / sample event routes; see
+    # :mod:`datamermaid.resources.aggregated`.
+
+    @property
+    def beltfishes(self) -> AggregatedFamilyResource:
+        """Aggregated fish belt data, ``/projects/{id}/beltfishes/``."""
+
+        return self._aggregated(BELTFISHES, AggregatedFamilyResource)
+
+    @property
+    def benthiclits(self) -> AggregatedFamilyResource:
+        """Aggregated benthic LIT data, ``/projects/{id}/benthiclits/``."""
+
+        return self._aggregated(BENTHICLITS, AggregatedFamilyResource)
+
+    @property
+    def benthicpits(self) -> AggregatedFamilyResource:
+        """Aggregated benthic PIT data, ``/projects/{id}/benthicpits/``."""
+
+        return self._aggregated(BENTHICPITS, AggregatedFamilyResource)
+
+    @property
+    def benthicpqts(self) -> AggregatedFamilyResource:
+        """Aggregated benthic photo quadrat data, ``/projects/{id}/benthicpqts/``."""
+
+        return self._aggregated(BENTHICPQTS, AggregatedFamilyResource)
+
+    @property
+    def habitatcomplexities(self) -> AggregatedFamilyResource:
+        """Aggregated habitat complexity data, ``/projects/{id}/habitatcomplexities/``."""
+
+        return self._aggregated(HABITATCOMPLEXITIES, AggregatedFamilyResource)
+
+    @property
+    def bleachingqcs(self) -> BleachingQCFamilyResource:
+        """Aggregated bleaching data, ``/projects/{id}/bleachingqcs/``.
+
+        Two observation views, :meth:`~BleachingQCFamilyResource.colonies_bleached`
+        and :meth:`~BleachingQCFamilyResource.quadrat_benthic_percent`.
+        """
+
+        return self._aggregated(BLEACHINGQCS, BleachingQCFamilyResource)
+
+    @property
+    def beltinverts(self) -> AggregatedFamilyResource:
+        """Aggregated macroinvertebrate belt data, ``/projects/{id}/beltinverts/``."""
+
+        return self._aggregated(BELTINVERTS, AggregatedFamilyResource)

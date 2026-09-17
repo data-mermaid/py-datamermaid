@@ -11,9 +11,19 @@ from ..pagination import Page, PaginatedList
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
 
-__all__ = ["BaseResource", "ReadOnlyResource", "Resource"]
+__all__ = ["BaseResource", "ReadOnlyResource", "Resource", "project_path"]
 
 M = TypeVar("M", bound=APIModel)
+
+
+def project_path(project_id: str, route: str) -> str:
+    """Compose ``projects/<project_id>/<route>``.
+
+    The id is percent-encoded, so a stray ``/`` or ``..`` in it cannot send the
+    request to a different endpoint.
+    """
+
+    return f"projects/{quote(project_id.strip('/'), safe='')}/{route}"
 
 
 class BaseResource:

@@ -40,6 +40,7 @@ from .exceptions import (
     ServerError,
 )
 from .models import (
+    AggregatedRecord,
     APIModel,
     BeltFishMethod,
     BeltInvertMethod,
@@ -76,7 +77,12 @@ from .models import (
     Transect,
 )
 from .pagination import PaginatedList
-from .resources import ProjectContext
+from .resources import (
+    AggregatedFamilyResource,
+    AggregatedViewFamily,
+    BleachingQCFamilyResource,
+    ProjectContext,
+)
 
 __all__ = [
     "BASE_URL_ENV_VAR",
@@ -84,6 +90,9 @@ __all__ = [
     "DEV_BASE_URL",
     "APIKeyAuth",
     "APIModel",
+    "AggregatedFamilyResource",
+    "AggregatedRecord",
+    "AggregatedViewFamily",
     "AnonymousAuth",
     "Auth",
     "Auth0Config",
@@ -97,6 +106,7 @@ __all__ = [
     "BenthicPITMethod",
     "BenthicPhotoQuadratTransectMethod",
     "BenthicTransect",
+    "BleachingQCFamilyResource",
     "BleachingQuadratCollectionMethod",
     "FishBeltTransect",
     "FishFamily",

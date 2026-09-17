@@ -15,6 +15,7 @@ from typing import Any, ClassVar, TypeVar
 
 __all__ = [
     "APIModel",
+    "AggregatedRecord",
     "BeltFishMethod",
     "BeltInvertMethod",
     "BenthicAttribute",
@@ -958,3 +959,34 @@ class BeltInvertMethod(SampleUnitMethod):
     )
 
     SAMPLE_UNIT_FIELD = "beltinvert_transect"
+
+
+#
+# The aggregated (denormalized) views, ``/projects/{project_id}/<family>/...``.
+
+
+@dataclass(frozen=True)
+class AggregatedRecord(APIModel):
+    """One row from an aggregated view, kept deliberately thin.
+
+    The observation, sample unit and sample event views under
+    ``/projects/{project_id}/beltfishes/``, ``/benthicpits/`` and their siblings
+    return wide, flat records: one row per observation (or per sample unit, or
+    per sample event) with every site, management and protocol column already
+    joined in.  The columns differ per protocol, per view and per API release,
+    so only the handful shared by all of them is declared here; the rest arrives
+    in :attr:`APIModel.extra` and :meth:`APIModel.to_dict` flattens it back out,
+    which is what ``to_df()`` turns into one DataFrame column per field.
+
+    The sample unit views have no ``id`` (they carry ``sample_unit_ids`` in
+    :attr:`extra` instead), so :attr:`id` is ``None`` on those rows.
+    """
+
+    id: str | None = None
+    project_id: str | None = None
+    project_name: str | None = None
+    site_id: str | None = None
+    site_name: str | None = None
+    sample_date: date | None = field(default=None, metadata=_api_meta(converter=parse_date))
+    management_id: str | None = None
+    sample_event_id: str | None = None
