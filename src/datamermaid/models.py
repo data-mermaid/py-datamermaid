@@ -94,6 +94,14 @@ def _mapping_tuple(value: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(dict(item) for item in value)
 
 
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("expected an object")
+    return dict(value)
+
+
 def _model_tuple(model: type[M]) -> Callable[[Any], tuple[M, ...]]:
     """Build a converter turning a JSON array into a tuple of ``model``."""
 
@@ -536,13 +544,17 @@ class SummarySampleEvent(APIModel):
     management_name: str | None = None
     management_est_year: int | None = None
     management_size: float | None = None
-    management_parties: str | None = None
+    management_parties: tuple[str, ...] = field(
+        default=(), metadata=_api_meta(converter=_string_tuple)
+    )
     management_compliance: str | None = None
     management_rules: tuple[str, ...] = field(
         default=(), metadata=_api_meta(converter=_string_tuple)
     )
     management_notes: str | None = None
-    protocols: Mapping[str, Any] = field(default_factory=dict)
+    protocols: Mapping[str, Any] = field(
+        default_factory=dict, metadata=_api_meta(converter=_mapping)
+    )
     contact_link: str | None = None
     suggested_citation: str | None = None
     data_policy_beltfish: str | None = None

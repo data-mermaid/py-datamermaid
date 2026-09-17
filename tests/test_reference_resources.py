@@ -13,14 +13,31 @@ import httpx
 import pytest
 import respx
 
-from datamermaid import PaginatedList
-from datamermaid.resources import REFERENCE_RESOURCES
+from datamermaid import MermaidClient, PaginatedList
+from datamermaid.resources import REFERENCE_RESOURCES, reference
 
 from .conftest import BASE_URL, page, reference_payload
 
-# (attribute on the client, resource class), as the client exposes them.
-RESOURCES = list(REFERENCE_RESOURCES)
-IDS = [attribute for attribute, _ in RESOURCES]
+# The route each client attribute must hit, spelled out so that a wrong
+# `Resource.path` fails a test instead of quietly moving the mock with it.
+PATHS = {
+    "sites": "sites/",
+    "managements": "managements/",
+    "project_tags": "projecttags/",
+    "fish_sizes": "fishsizes/",
+    "fish_families": "fishfamilies/",
+    "fish_genera": "fishgenera/",
+    "fish_species": "fishspecies/",
+    "benthic_attributes": "benthicattributes/",
+    "invert_attributes": "invertattributes/",
+    "invert_species": "invertspecies/",
+    "summary_sample_events": "summarysampleevents/",
+    "label_mappings": "classification/labelmappings/",
+}
+
+# (attribute on the client, resource class, path), as the client exposes them.
+RESOURCES = [(attribute, cls, PATHS[attribute]) for attribute, cls in REFERENCE_RESOURCES]
+IDS = [attribute for attribute, _, _ in RESOURCES]
 
 
 def record_id(payload):
@@ -30,11 +47,12 @@ def record_id(payload):
     return payload.get("id") or payload["sample_event_id"]
 
 
-@pytest.mark.parametrize(("attribute", "resource_class"), RESOURCES, ids=IDS)
+@pytest.mark.parametrize(("attribute", "resource_class", "path"), RESOURCES, ids=IDS)
 @respx.mock
-def test_list_returns_typed_models(client, attribute, resource_class):
+def test_list_returns_typed_models(client, attribute, resource_class, path):
+    assert resource_class.path == path
     payload = reference_payload(attribute)
-    route = respx.get(f"{BASE_URL}{resource_class.path}").mock(
+    route = respx.get(f"{BASE_URL}{path}").mock(
         return_value=httpx.Response(200, json=page([payload]))
     )
 
@@ -51,12 +69,13 @@ def test_list_returns_typed_models(client, attribute, resource_class):
     assert route.call_count == 1
 
 
-@pytest.mark.parametrize(("attribute", "resource_class"), RESOURCES, ids=IDS)
+@pytest.mark.parametrize(("attribute", "resource_class", "path"), RESOURCES, ids=IDS)
 @respx.mock
-def test_get_fetches_one_record_by_id(client, attribute, resource_class):
+def test_get_fetches_one_record_by_id(client, attribute, resource_class, path):
+    assert resource_class.path == path
     payload = reference_payload(attribute)
     identifier = record_id(payload)
-    route = respx.get(f"{BASE_URL}{resource_class.path}{identifier}/").mock(
+    route = respx.get(f"{BASE_URL}{path}{identifier}/").mock(
         return_value=httpx.Response(200, json=payload)
     )
 
@@ -66,11 +85,24 @@ def test_get_fetches_one_record_by_id(client, attribute, resource_class):
     assert route.call_count == 1
 
 
-@pytest.mark.parametrize(("attribute", "resource_class"), RESOURCES, ids=IDS)
-def test_resources_are_cached_on_the_client(client, attribute, resource_class):
+@pytest.mark.parametrize(("attribute", "resource_class", "path"), RESOURCES, ids=IDS)
+def test_resources_are_cached_on_the_client(client, attribute, resource_class, path):
     resource = getattr(client, attribute)
     assert isinstance(resource, resource_class)
+    assert resource.path == path
     assert getattr(client, attribute) is resource
+
+
+def test_the_registry_lists_every_reference_resource_on_the_client(client):
+    """The client hand-writes its properties; they must match the registry."""
+
+    exposed = {
+        name: type(getattr(client, name))
+        for name, attribute in vars(MermaidClient).items()
+        if isinstance(attribute, property)
+        and type(getattr(client, name)).__module__ == reference.__name__
+    }
+    assert exposed == dict(REFERENCE_RESOURCES)
 
 
 @respx.mock
@@ -157,9 +189,26 @@ def test_summary_sample_events_expose_dates_policies_and_protocols(client):
     summary = client.summary_sample_events.list()[0]
     assert summary.sample_date == datetime.date(2008, 11, 25)
     assert summary.management_rules == ("open access",)
+    assert summary.management_parties == ("government",)
     assert summary.protocols["benthicpit"]["sample_unit_count"] == 3
     assert summary.data_policies["beltfish"] == "private"
     assert [tag["name"] for tag in summary.tags] == ["Marine Ecology Consulting Fiji"]
+
+
+@respx.mock
+def test_summary_sample_event_collections_survive_a_null(client):
+    payload = {
+        **reference_payload("summary_sample_events"),
+        "management_parties": None,
+        "protocols": None,
+    }
+    respx.get(f"{BASE_URL}summarysampleevents/").mock(
+        return_value=httpx.Response(200, json=page([payload]))
+    )
+
+    summary = client.summary_sample_events.list()[0]
+    assert summary.management_parties == ()
+    assert summary.protocols == {}
 
 
 @respx.mock

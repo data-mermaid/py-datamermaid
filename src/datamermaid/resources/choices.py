@@ -47,7 +47,12 @@ class ChoicesResource(BaseResource):
             # `_choice_set` rejects anything that is not a choice set object,
             # so reading `name` off it afterwards is safe.
             rows = _choice_set(entry)
-            sets[str(entry.get("name"))] = rows
+            name = entry.get("name")
+            if not isinstance(name, str) or not name:
+                raise TypeError("a choice set came back without a name")
+            if name in sets:
+                raise ValueError(f"the API returned two choice sets named {name!r}")
+            sets[name] = rows
         return sets
 
     def get(self, name: str) -> ChoiceSet:

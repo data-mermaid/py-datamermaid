@@ -232,7 +232,9 @@
     "management_id": "ca4c55ef-5a26-4ab4-9a71-eab9163af211",
     "management_name": "Gau_open",
     "management_notes": null,
-    "management_parties": null,
+    "management_parties": [
+      "government"
+    ],
     "management_rules": [
       "open access"
     ],

@@ -68,6 +68,28 @@ def test_an_unknown_choice_set_raises_not_found(client):
 
 
 @respx.mock
+def test_a_nameless_choice_set_is_rejected(client):
+    respx.get(f"{BASE_URL}choices/").mock(
+        return_value=httpx.Response(200, json=[{"data": [{"id": "1", "name": "first"}]}])
+    )
+
+    with pytest.raises(TypeError, match="without a name"):
+        client.choices()
+
+
+@respx.mock
+def test_duplicate_choice_set_names_are_rejected(client):
+    payload = [
+        {"name": "reeftypes", "data": [{"id": "1", "name": "atoll"}]},
+        {"name": "reeftypes", "data": [{"id": "2", "name": "barrier"}]},
+    ]
+    respx.get(f"{BASE_URL}choices/").mock(return_value=httpx.Response(200, json=payload))
+
+    with pytest.raises(ValueError, match="two choice sets named 'reeftypes'"):
+        client.choices()
+
+
+@respx.mock
 def test_a_paginated_response_would_be_rejected(client):
     """The endpoint answering with a DRF page means the SDK's shape is wrong."""
 
