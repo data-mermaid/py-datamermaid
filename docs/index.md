@@ -126,4 +126,4 @@ The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
 
 ## License
 
-MIT. See [LICENSE](https://github.com/data-mermaid/py-datamermaid/blob/main/LICENSE).
+GPLv3. See [LICENSE](https://github.com/data-mermaid/py-datamermaid/blob/main/LICENSE).

@@ -447,9 +447,10 @@ document with a directory summary and every included file, scanned for secrets
 before it is written. The output is git-ignored, since it is a generated
 artifact - regenerate it rather than committing it.
 
-CI regenerates it on every push to `main` and uploads it as the
-`repomix-output` artifact of the *RepoMix* workflow run, downloadable from the
-Actions tab.
+On every push to `main` the *Docs* workflow regenerates it and publishes it
+with the documentation site, so agents can fetch the current pack directly:
+
+<https://data-mermaid.github.io/py-datamermaid/repomix-output.xml>
 
 ## Documentation
 

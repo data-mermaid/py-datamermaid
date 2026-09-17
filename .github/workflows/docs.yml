@@ -27,6 +27,22 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Set up Node
+        if: github.ref == 'refs/heads/main'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Packed into `docs/` rather than into `site/`: `mkdocs build` cleans the
+      # site directory first, so anything copied there beforehand is deleted.
+      # MkDocs copies non-Markdown files out of `docs/` verbatim, which puts the
+      # pack at <site>/repomix-output.xml for agents to fetch directly. The file
+      # is git-ignored, and `repomix.config.json` ignores `repomix-output.*`, so
+      # a pack is never committed and never packs a previous pack.
+      - name: Pack the repository for LLMs
+        if: github.ref == 'refs/heads/main'
+        run: npx -y repomix@1 --output docs/repomix-output.xml
+
       # `--strict` turns a broken link, an orphaned page or a cross-reference to
       # a symbol that no longer exists into a failure, so a pull request that
       # breaks the docs cannot merge.
