@@ -11,23 +11,20 @@ from ..pagination import Page, PaginatedList
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
 
-__all__ = ["Resource"]
+__all__ = ["BaseResource", "ReadOnlyResource", "Resource"]
 
 M = TypeVar("M", bound=APIModel)
 
 
-class Resource(Generic[M]):
-    """Base class for endpoint wrappers.
+class BaseResource:
+    """Anything reachable through the client: a path and a way to request it.
 
-    Subclasses set :attr:`path` and :attr:`model` and expose whatever public
-    methods make sense for the endpoint, built on :meth:`_list` and
-    :meth:`_get`.
+    Endpoints whose responses are not lists of models (``/choices/``) extend
+    this directly; everything else extends :class:`Resource`.
     """
 
     #: Endpoint path relative to the API root, e.g. ``"projects/"``.
     path: str
-    #: Model the endpoint's records are parsed into.
-    model: type[M]
 
     def __init__(self, client: MermaidClient) -> None:
         self._client = client
@@ -44,6 +41,18 @@ class Resource(Generic[M]):
 
         suffix = "".join(quote(part.strip("/"), safe="") + "/" for part in parts)
         return f"{self.path}{suffix}"
+
+
+class Resource(BaseResource, Generic[M]):
+    """Base class for endpoints returning records of one model.
+
+    Subclasses set :attr:`path` and :attr:`model` and expose whatever public
+    methods make sense for the endpoint, built on :meth:`_list` and
+    :meth:`_get`.
+    """
+
+    #: Model the endpoint's records are parsed into.
+    model: type[M]
 
     def _parse(self, data: Any) -> M:
         return self.model.from_api(data)
@@ -110,3 +119,31 @@ class Resource(Generic[M]):
 
         data = self._client.request_json("GET", url, params=params or None)
         return self._parse(data)
+
+
+class ReadOnlyResource(Resource[M]):
+    """A read-only endpoint: a paginated list plus a ``/<id>/`` detail route.
+
+    Reference endpoints differ only in their path and model, so they subclass
+    this and declare those two attributes.
+    """
+
+    def list(self, **filters: Any) -> PaginatedList[M]:
+        """List records, lazily fetching pages as they are consumed.
+
+        Keyword arguments become query parameters, so anything the endpoint
+        filters on can be passed straight through, alongside the parameters
+        every list route understands: ``limit``, ``search``, ``ordering`` and
+        ``fields``.  An argument whose value is ``None`` is left out.
+        """
+
+        return self._list(params=dict(filters))
+
+    def get(self, record_id: str, **params: Any) -> M:
+        """Fetch a single record by id.
+
+        Keyword arguments become query parameters, as for :meth:`list`.
+        """
+
+        query = {key: value for key, value in params.items() if value is not None}
+        return self._get(self._url(record_id), params=query)

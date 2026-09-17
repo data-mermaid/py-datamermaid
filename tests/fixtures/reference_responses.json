@@ -1,0 +1,295 @@
+{
+  "benthic_attributes": {
+    "created_by": "76966e8b-18d1-4e1c-802f-558ecd9781f3",
+    "created_on": "2026-03-06T09:03:24.570371Z",
+    "growth_form_life_histories": null,
+    "id": "6e0d2c7d-8d2b-49e1-a11c-142be337cb2f",
+    "life_histories": null,
+    "name": "Aaptos",
+    "notes": "",
+    "parent": "6b9fdd82-685f-4f21-8fa3-883e06be2c30",
+    "regions": [
+      "1d31d9ea-e78d-438b-8667-0d63d1aba257",
+      "601a5a58-eb77-48a9-8f25-537ba6ae72a0",
+      "8229ee76-9bf8-4a6f-b5ae-478c851ebc0d",
+      "983267a0-7349-4d3e-a23e-fb9353ca8ba5",
+      "9f443e9a-650b-4113-aeac-792ce3036f0c",
+      "afd77a51-b9fa-4cea-95cf-f4e34143c14a",
+      "b42b9f57-665c-48bd-b93a-add0aeda3f07",
+      "c1ea4bdf-7a80-4a72-a1c0-546dc28ab6bb",
+      "f56fe186-a906-45da-a453-30c6f7656555"
+    ],
+    "status": 90,
+    "top_level_category": "3dc38d25-ed80-4049-af16-e85f04f97cc6",
+    "updated_by": null,
+    "updated_on": "2026-03-06T09:03:24.570400Z"
+  },
+  "fish_families": {
+    "biomass_constant_a": 0.022815,
+    "biomass_constant_b": 2.965122,
+    "biomass_constant_c": 1.0,
+    "created_by": null,
+    "created_on": "2018-04-04T19:03:53.967812Z",
+    "id": "3f7bf3ee-68e7-4594-a755-ddb0223d9caa",
+    "name": "Acanthuridae",
+    "regions": [
+      "0ba3cc10-eefc-4a68-a195-d6cfd3a58644",
+      "1d31d9ea-e78d-438b-8667-0d63d1aba257",
+      "601a5a58-eb77-48a9-8f25-537ba6ae72a0",
+      "8229ee76-9bf8-4a6f-b5ae-478c851ebc0d",
+      "983267a0-7349-4d3e-a23e-fb9353ca8ba5",
+      "9d1a32f5-02e8-4228-a6ae-d5fd66bff69c",
+      "9f443e9a-650b-4113-aeac-792ce3036f0c",
+      "afd77a51-b9fa-4cea-95cf-f4e34143c14a",
+      "b42b9f57-665c-48bd-b93a-add0aeda3f07",
+      "f56fe186-a906-45da-a453-30c6f7656555"
+    ],
+    "status": 90,
+    "updated_by": null,
+    "updated_on": "2018-04-04T19:03:53.967831Z"
+  },
+  "fish_genera": {
+    "biomass_constant_a": 0.030014,
+    "biomass_constant_b": 2.89,
+    "biomass_constant_c": 1.0,
+    "created_by": null,
+    "created_on": "2018-04-04T19:03:59.415840Z",
+    "family": "b686beff-3ab7-4310-83de-010cc26ae6f3",
+    "id": "f5263c54-ea12-4a18-8200-d52967376d1a",
+    "name": "Abalistes",
+    "regions": [
+      "0ba3cc10-eefc-4a68-a195-d6cfd3a58644",
+      "1d31d9ea-e78d-438b-8667-0d63d1aba257",
+      "601a5a58-eb77-48a9-8f25-537ba6ae72a0",
+      "983267a0-7349-4d3e-a23e-fb9353ca8ba5",
+      "9f443e9a-650b-4113-aeac-792ce3036f0c",
+      "afd77a51-b9fa-4cea-95cf-f4e34143c14a"
+    ],
+    "status": 90,
+    "updated_by": null,
+    "updated_on": "2018-04-04T19:03:59.415858Z"
+  },
+  "fish_sizes": {
+    "created_by": null,
+    "created_on": "2017-09-27T19:51:41.932280Z",
+    "fish_bin_size": "3232100a-a9b2-462c-955c-0dae7b72514f",
+    "id": "7953208c-4856-4863-b011-dd692b3bf7a6",
+    "max_val": 10.0,
+    "min_val": 0.0,
+    "name": "0 - 10",
+    "updated_by": null,
+    "updated_on": "2020-06-25T16:32:13.632407Z",
+    "val": 5.0
+  },
+  "fish_species": {
+    "biomass_constant_a": 0.026915,
+    "biomass_constant_b": 2.92,
+    "biomass_constant_c": 1.0,
+    "climate_score": null,
+    "created_by": null,
+    "created_on": "2018-10-12T15:22:10.249495Z",
+    "display_name": "Abalistes filamentosus",
+    "functional_group": "4d268d15-a189-4925-b51f-fc7bddff5e47",
+    "genus": "f5263c54-ea12-4a18-8200-d52967376d1a",
+    "group_size": "930bac6f-5723-4863-81f1-819513df0296",
+    "id": "8f9d614e-3ba8-49dd-8003-593a3616fd75",
+    "max_length": 39.65,
+    "max_length_type": "total length",
+    "name": "filamentosus",
+    "notes": "",
+    "regions": [
+      "983267a0-7349-4d3e-a23e-fb9353ca8ba5",
+      "1d31d9ea-e78d-438b-8667-0d63d1aba257",
+      "0ba3cc10-eefc-4a68-a195-d6cfd3a58644"
+    ],
+    "status": 90,
+    "trophic_group": "2dda0d31-dd2c-4ffa-8ea5-99c01f49802f",
+    "trophic_level": 3.38,
+    "updated_by": null,
+    "updated_on": "2026-04-21T21:39:11.991288Z",
+    "vulnerability": 29.65
+  },
+  "invert_attributes": {
+    "created_by": null,
+    "created_on": "2026-05-14T10:46:23.207958Z",
+    "group_of_interest": null,
+    "id": "005334b8-dc2e-4e98-bc72-e6d31017a33c",
+    "max_length": 8.0,
+    "max_length_source": null,
+    "max_length_type": null,
+    "max_length_url": null,
+    "name": "Inachidae",
+    "notes": null,
+    "parent": "ec2da58e-c394-49dd-8867-faf6b61f5c63",
+    "status": 90,
+    "taxonomic_rank": "family",
+    "updated_by": null,
+    "updated_on": "2026-06-16T20:39:39.628412Z"
+  },
+  "invert_species": {
+    "created_by": null,
+    "created_on": "2026-05-14T10:46:23.272866Z",
+    "display_name": "Acanthaster planci",
+    "genus": "21aac238-af0c-4670-b7bc-a31eff4347f7",
+    "id": "dbbe152a-3ec9-4dc2-a265-9114e4bacad4",
+    "max_length": 80.0,
+    "max_length_source": "SeaLifeBase \u2013 species",
+    "max_length_type": "arm length",
+    "max_length_url": "https://www.sealifebase.se/summary/Acanthaster-planci.html",
+    "name": "planci",
+    "notes": "",
+    "status": 90,
+    "updated_by": null,
+    "updated_on": "2026-06-16T20:39:39.628412Z"
+  },
+  "label_mappings": {
+    "benthic_attribute_id": "405191d9-4d7b-497e-9965-4149142653ac",
+    "benthic_attribute_name": "Abyla",
+    "growth_form_id": null,
+    "growth_form_name": null,
+    "id": "967ddc16-7fb8-43db-add4-bcd19e21601e",
+    "provider": "ReefCloud",
+    "provider_id": "3230",
+    "provider_label": "Abyla"
+  },
+  "managements": {
+    "access_restriction": false,
+    "boundary": null,
+    "compliance": null,
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "est_year": null,
+    "gear_restriction": false,
+    "id": "bbbbbbbb-0000-0000-0000-000000000001",
+    "name": "Gau_open",
+    "name_secondary": "",
+    "no_take": false,
+    "notes": "",
+    "open_access": true,
+    "parties": [],
+    "periodic_closure": false,
+    "predecessor": null,
+    "project": "9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "rules": "Open Access",
+    "size": null,
+    "size_limits": false,
+    "species_restriction": false,
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "validations": null
+  },
+  "project_tags": {
+    "created_by": "bd9372bf-ab8c-4dc0-8dac-14e102735ffe",
+    "created_on": "2026-05-28T09:11:17.989916Z",
+    "description": "",
+    "id": "3de9da4d-824e-4b20-bd54-91c1e19e5460",
+    "name": "Akar Global Inisiatif",
+    "slug": "akar-global-inisiatif",
+    "status": 90,
+    "updated_by": "bd9372bf-ab8c-4dc0-8dac-14e102735ffe",
+    "updated_on": "2026-05-28T09:31:03.730401Z"
+  },
+  "sites": {
+    "country": "dd865c41-6f84-4e47-8fd7-8a6de436881f",
+    "created_by": "22222222-2222-2222-2222-222222222222",
+    "created_on": "2019-05-02T18:43:11.000000Z",
+    "exposure": "26f27b61-cf43-4c70-9c2e-2b1b8b3a0a2f",
+    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "location": {
+      "coordinates": [
+        179.2251,
+        -17.97855
+      ],
+      "type": "Point"
+    },
+    "name": "Anthias Avenue",
+    "notes": "",
+    "predecessor": null,
+    "project": "9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "reef_type": "d6bb0a1e-0b7c-4b04-9e34-2ba7fa6c5d5a",
+    "reef_zone": "2c4d31fa-1c08-4e63-9e9f-43fb2a4f4d84",
+    "updated_by": "22222222-2222-2222-2222-222222222222",
+    "updated_on": "2021-07-19T12:00:00.000000Z",
+    "validations": null
+  },
+  "summary_sample_events": {
+    "contact_link": "https://datamermaid.org/contact-project?project_id=9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "country_id": "dd865c41-6f84-4e47-8fd7-8a6de436881f",
+    "country_name": "Fiji",
+    "data_policy_beltfish": "private",
+    "data_policy_benthiclit": "public summary",
+    "data_policy_benthicpit": "public summary",
+    "data_policy_benthicpqt": "public summary",
+    "data_policy_bleachingqc": "public summary",
+    "data_policy_habitatcomplexity": "public summary",
+    "data_policy_macroinvertebrate": "public summary",
+    "depth_avg": 6.0,
+    "depth_sd": 0.0,
+    "latitude": -17.97855,
+    "longitude": 179.2251,
+    "management_compliance": null,
+    "management_est_year": null,
+    "management_id": "ca4c55ef-5a26-4ab4-9a71-eab9163af211",
+    "management_name": "Gau_open",
+    "management_notes": null,
+    "management_parties": [
+      "government"
+    ],
+    "management_rules": [
+      "open access"
+    ],
+    "management_size": null,
+    "observers": [
+      {
+        "id": "21c65a4e-4e60-4ee1-a8e2-5fe2a1d871a9",
+        "name": "Helen Sykes"
+      }
+    ],
+    "project_admins": [
+      {
+        "id": "9639b282-d40d-41d3-b769-b44254df7b81",
+        "name": "Ariel Greiner"
+      },
+      {
+        "id": "21c65a4e-4e60-4ee1-a8e2-5fe2a1d871a9",
+        "name": "Helen Sykes"
+      },
+      {
+        "id": "7901c943-5370-4896-a9ed-4b6ff5cb6ba0",
+        "name": "Emily Darling"
+      },
+      {
+        "id": "b08e3421-ff8a-4d74-969c-75f640af5f3c",
+        "name": "Yashika Nand"
+      }
+    ],
+    "project_id": "9bf0538e-99c7-405b-a54b-a1568c8a757e",
+    "project_includes_gfcr": false,
+    "project_name": "2001-2020_HSykes Data",
+    "project_notes": "Fiji benthic data.",
+    "protocols": {
+      "benthicpit": {
+        "percent_cover_benthic_category_avg": {
+          "Hard coral": 31.67,
+          "Macroalgae": 10.83
+        },
+        "sample_unit_count": 3
+      }
+    },
+    "reef_exposure": "exposed",
+    "reef_type": "barrier",
+    "reef_zone": "pinnacle",
+    "sample_date": "2008-11-25",
+    "sample_event_id": "07b7b990-d707-4910-b3bc-23228da1e65b",
+    "site_id": "9b2238bd-9ff2-4a04-be1d-44892006097c",
+    "site_name": "AA",
+    "site_notes": "Anthias Avenue",
+    "suggested_citation": "Someone. 2014. MERMAID.",
+    "tags": [
+      {
+        "id": "62387078-503a-47bc-83e3-117bd3167eb6",
+        "name": "Marine Ecology Consulting Fiji"
+      }
+    ]
+  }
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import pathlib
 import socket
 import time
 
@@ -183,3 +184,18 @@ def page(results, next_url=None, count=None):
         "previous": None,
         "results": results,
     }
+
+
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+def load_fixture(name):
+    """Load a captured API payload from ``tests/fixtures``."""
+
+    return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def reference_payload(attribute):
+    """One record as the API returns it, keyed by client attribute name."""
+
+    return load_fixture("reference_responses")[attribute]

@@ -49,6 +49,68 @@ with MermaidClient() as client:  # or MermaidClient(api_key="mmd_<key_id>.<secre
 
 The key is sent as `Authorization: Bearer mmd_<key_id>.<secret>`.
 
+### Reference data and summaries
+
+Beyond `/projects/`, every top-level route is reachable as a client attribute
+returning the same lazy `PaginatedList` of typed models:
+
+| Attribute | Route | Model | Auth |
+| --- | --- | --- | --- |
+| `client.sites` | `/sites/` | `Site` | required |
+| `client.managements` | `/managements/` | `Management` | required |
+| `client.project_tags` | `/projecttags/` | `ProjectTag` | public |
+| `client.fish_sizes` | `/fishsizes/` | `FishSize` | public |
+| `client.fish_families` | `/fishfamilies/` | `FishFamily` | public |
+| `client.fish_genera` | `/fishgenera/` | `FishGenus` | public |
+| `client.fish_species` | `/fishspecies/` | `FishSpecies` | public |
+| `client.benthic_attributes` | `/benthicattributes/` | `BenthicAttribute` | public |
+| `client.invert_attributes` | `/invertattributes/` | `InvertAttribute` | public |
+| `client.invert_species` | `/invertspecies/` | `InvertSpecies` | public |
+| `client.summary_sample_events` | `/summarysampleevents/` | `SummarySampleEvent` | public |
+| `client.label_mappings` | `/classification/labelmappings/` | `LabelMapping` | public |
+
+Each has `.list(**filters)` and `.get(id)`. Load the fish taxonomy into a
+DataFrame:
+
+```python
+from datamermaid import MermaidClient
+
+with MermaidClient() as client:  # taxonomy is public, no credentials needed
+    species = client.fish_species.list(limit=1000).to_df()
+    species[["display_name", "max_length", "trophic_level"]].head()
+
+    # Filters are the API's own, passed through as query parameters.
+    acanthuridae = client.fish_families.list(search="Acanthuridae")[0]
+    for genus in client.fish_genera.list(family=acanthuridae.id):
+        print(genus.name, len(client.fish_species.list(genus=genus.id)))
+```
+
+Site-level summaries of every public sample event, with the per-protocol
+aggregates kept as a nested mapping:
+
+```python
+summaries = client.summary_sample_events.list(project_name="Fiji", sample_date_after="2018-01-01")
+for summary in summaries:
+    print(summary.site_name, summary.sample_date, summary.protocols.keys())
+```
+
+`client.sites` and `client.managements` return the sites and management
+regimes of every project the credentials can see, so they need an API key or a
+login.
+
+### Choices
+
+`/choices/` is the API's set of controlled vocabularies, and the one list route
+that is not paginated, so it comes back as plain dictionaries:
+
+```python
+choices = client.choices()  # every set, keyed by name
+choices.keys()  # 'countries', 'reeftypes', 'managementparties', ...
+[reef_type["name"] for reef_type in choices["reeftypes"]]
+
+client.choices("reeftypes")  # just one set, from /choices/reeftypes/
+```
+
 ### Pagination
 
 `client.projects.list()` returns a `PaginatedList`. It issues no request until

@@ -7,7 +7,7 @@ import platform
 import random
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 import httpx
 
@@ -17,13 +17,31 @@ from .exceptions import MermaidConnectionError, parse_retry_after, raise_for_sta
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .models import Me
+    from .resources.base import BaseResource
     from .resources.projects import ProjectsResource
+    from .resources.reference import (
+        BenthicAttributesResource,
+        FishFamiliesResource,
+        FishGeneraResource,
+        FishSizesResource,
+        FishSpeciesResource,
+        InvertAttributesResource,
+        InvertSpeciesResource,
+        LabelMappingsResource,
+        ManagementsResource,
+        ProjectTagsResource,
+        SitesResource,
+        SummarySampleEventsResource,
+    )
 
 __all__ = ["BASE_URL_ENV_VAR", "DEFAULT_BASE_URL", "DEV_BASE_URL", "MermaidClient"]
 
 DEFAULT_BASE_URL = "https://api.datamermaid.org/v1/"
 DEV_BASE_URL = "https://dev-api.datamermaid.org/v1/"
 BASE_URL_ENV_VAR = "MERMAID_API_URL"
+
+#: A resource wrapper cached on the client, for :meth:`MermaidClient._resource`.
+R = TypeVar("R", bound="BaseResource")
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
@@ -52,6 +70,12 @@ class MermaidClient:
         ...     me = client.me()
         ...     for project in client.projects.list():
         ...         print(project.name)
+
+    Reference data needs no credentials, and each endpoint is a property
+    returning a lazy, filterable list:
+        >>> with MermaidClient() as client:  # doctest: +SKIP
+        ...     species = client.fish_species.list(genus=genus_id)
+        ...     reef_types = client.choices("reeftypes")
     """
 
     def __init__(
@@ -90,7 +114,7 @@ class MermaidClient:
             follow_redirects=True,
             transport=transport,
         )
-        self._projects: ProjectsResource | None = None
+        self._resources: dict[type[Any], Any] = {}
 
     # -- lifecycle --------------------------------------------------------
 
@@ -115,22 +139,152 @@ class MermaidClient:
 
     # -- resources --------------------------------------------------------
 
-    @property
-    def projects(self) -> ProjectsResource:
-        """Access to the ``/projects/`` endpoints."""
+    def _resource(self, resource_class: type[R]) -> R:
+        """Return the client's single instance of ``resource_class``."""
 
-        if self._projects is None:
-            from .resources.projects import ProjectsResource
-
-            self._projects = ProjectsResource(self)
-        return self._projects
+        resource = self._resources.get(resource_class)
+        if resource is None:
+            resource = resource_class(self)
+            self._resources[resource_class] = resource
+        return cast("R", resource)
 
     def me(self) -> Me:
         """Return the profile that owns the credentials in use (``GET /me/``)."""
 
         from .resources.me import MeResource
 
-        return MeResource(self).get()
+        return self._resource(MeResource).get()
+
+    @property
+    def projects(self) -> ProjectsResource:
+        """Access to the ``/projects/`` endpoints."""
+
+        from .resources.projects import ProjectsResource
+
+        return self._resource(ProjectsResource)
+
+    @property
+    def sites(self) -> SitesResource:
+        """Reef sites, ``/sites/`` (requires authentication)."""
+
+        from .resources.reference import SitesResource
+
+        return self._resource(SitesResource)
+
+    @property
+    def managements(self) -> ManagementsResource:
+        """Management regimes, ``/managements/`` (requires authentication)."""
+
+        from .resources.reference import ManagementsResource
+
+        return self._resource(ManagementsResource)
+
+    @property
+    def project_tags(self) -> ProjectTagsResource:
+        """Organisation tags, ``/projecttags/``."""
+
+        from .resources.reference import ProjectTagsResource
+
+        return self._resource(ProjectTagsResource)
+
+    @property
+    def fish_sizes(self) -> FishSizesResource:
+        """Fish size bins, ``/fishsizes/``."""
+
+        from .resources.reference import FishSizesResource
+
+        return self._resource(FishSizesResource)
+
+    @property
+    def fish_families(self) -> FishFamiliesResource:
+        """Fish families, ``/fishfamilies/``."""
+
+        from .resources.reference import FishFamiliesResource
+
+        return self._resource(FishFamiliesResource)
+
+    @property
+    def fish_genera(self) -> FishGeneraResource:
+        """Fish genera, ``/fishgenera/``."""
+
+        from .resources.reference import FishGeneraResource
+
+        return self._resource(FishGeneraResource)
+
+    @property
+    def fish_species(self) -> FishSpeciesResource:
+        """Fish species, ``/fishspecies/``."""
+
+        from .resources.reference import FishSpeciesResource
+
+        return self._resource(FishSpeciesResource)
+
+    @property
+    def benthic_attributes(self) -> BenthicAttributesResource:
+        """Benthic attributes, ``/benthicattributes/``."""
+
+        from .resources.reference import BenthicAttributesResource
+
+        return self._resource(BenthicAttributesResource)
+
+    @property
+    def invert_attributes(self) -> InvertAttributesResource:
+        """Macroinvertebrate attributes, ``/invertattributes/``."""
+
+        from .resources.reference import InvertAttributesResource
+
+        return self._resource(InvertAttributesResource)
+
+    @property
+    def invert_species(self) -> InvertSpeciesResource:
+        """Macroinvertebrate species, ``/invertspecies/``."""
+
+        from .resources.reference import InvertSpeciesResource
+
+        return self._resource(InvertSpeciesResource)
+
+    @property
+    def summary_sample_events(self) -> SummarySampleEventsResource:
+        """Public sample event summaries, ``/summarysampleevents/``."""
+
+        from .resources.reference import SummarySampleEventsResource
+
+        return self._resource(SummarySampleEventsResource)
+
+    @property
+    def label_mappings(self) -> LabelMappingsResource:
+        """Classifier label mappings, ``/classification/labelmappings/``."""
+
+        from .resources.reference import LabelMappingsResource
+
+        return self._resource(LabelMappingsResource)
+
+    @overload
+    def choices(self) -> dict[str, list[dict[str, Any]]]: ...
+
+    @overload
+    def choices(self, name: str) -> list[dict[str, Any]]: ...
+
+    def choices(self, name: str | None = None) -> Any:
+        """Return the API's controlled vocabularies (``GET /choices/``).
+
+        Without an argument, every choice set keyed by name (``countries``,
+        ``reeftypes``, ``managementparties``, ...).  With one, just that set's
+        rows, fetched from ``/choices/<name>/``.
+
+        Unlike the list endpoints this one is not paginated, so it returns
+        plain dictionaries rather than a ``PaginatedList`` of models.
+
+            >>> client.choices()["reeftypes"]  # doctest: +SKIP
+            [{'id': '...', 'name': 'atoll', 'updated_on': '...'}, ...]
+        """
+
+        from .resources.choices import ChoicesResource
+
+        resource = self._resource(ChoicesResource)
+        if name is None:
+            return resource.fetch()
+        return resource.get(name)
 
     # -- transport --------------------------------------------------------
 
