@@ -1,10 +1,11 @@
 """The interactive OAuth grants used to obtain a MERMAID access token.
 
-Each flow is a small object with a single :meth:`Flow.authorize` method.
-Everything that would otherwise touch the outside world - the browser, the
-terminal, the clock, the HTTP client, the loopback server - arrives through a
-:class:`FlowContext`, so the tests drive the whole thing without opening a
-browser or a socket.
+Each flow is a small object with a single
+[`Flow.authorize`][datamermaid.auth.flows.Flow.authorize] method.  Everything that would
+otherwise touch the outside world - the browser, the terminal, the clock, the HTTP
+client, the loopback server - arrives through a
+[`FlowContext`][datamermaid.auth.flows.FlowContext], so the tests drive the whole thing
+without opening a browser or a socket.
 """
 
 from __future__ import annotations
@@ -127,9 +128,9 @@ def post_form(
 ) -> dict[str, Any]:
     """POST a form to an OAuth endpoint and return the decoded JSON body.
 
-    Errors are raised as :class:`AuthFlowError` carrying Auth0's own
-    ``error``/``error_description``; the caller sees the response only when it
-    succeeded.
+    Errors are raised as [`AuthFlowError`][datamermaid.exceptions.AuthFlowError]
+    carrying Auth0's own ``error``/``error_description``; the caller sees the response
+    only when it succeeded.
     """
 
     try:
@@ -159,7 +160,10 @@ def _error_message(payload: dict[str, Any], status_code: int, expect: str) -> st
 
 
 def token_set(payload: dict[str, Any], ctx: FlowContext) -> TokenSet:
-    """Build a :class:`TokenSet`, reporting a malformed response as a flow error."""
+    """Build a token set, reporting a malformed response as a flow error.
+
+    See [`TokenSet`][datamermaid.auth.token_cache.TokenSet].
+    """
 
     try:
         return TokenSet.from_response(payload, now=ctx.now())
@@ -170,12 +174,12 @@ def token_set(payload: dict[str, Any], ctx: FlowContext) -> TokenSet:
 def _check_callback(params: dict[str, str], state: str, *, require_state: bool = True) -> None:
     """Reject a callback that is not the answer to the request we sent.
 
-    For the implicit grant the ``state`` parameter is the only thing tying the
-    response to this process, so a callback that omits it entirely is treated
-    the same as one that gets it wrong: anything able to reach the loopback
-    port could otherwise hand us an attacker's token.  Only the pasted bare
-    code of :class:`ManualPasteFlow` - which carries no parameters at all - is
-    allowed through without one.
+    For the implicit grant the ``state`` parameter is the only thing tying the response
+    to this process, so a callback that omits it entirely is treated the same as one
+    that gets it wrong: anything able to reach the loopback port could otherwise hand us
+    an attacker's token.  Only the pasted bare code of
+    [`ManualPasteFlow`][datamermaid.auth.flows.ManualPasteFlow] - which carries no
+    parameters at all - is allowed through without one.
     """
 
     if params.get("error"):
@@ -194,7 +198,10 @@ def _check_callback(params: dict[str, str], state: str, *, require_state: bool =
 
 
 class Flow(ABC):
-    """One way of turning a user's consent into a :class:`TokenSet`."""
+    """One way of turning a user's consent into a set of tokens.
+
+    See [`TokenSet`][datamermaid.auth.token_cache.TokenSet].
+    """
 
     #: Value accepted by ``OAuth(flow=...)``.
     name: str

@@ -107,7 +107,7 @@ def parse_redirect(value: str) -> dict[str, str]:
 
 
 class _CallbackServer(HTTPServer):
-    """An :class:`HTTPServer` that remembers the one callback it received."""
+    """An ``HTTPServer`` that remembers the one callback it received."""
 
     mode: CallbackMode = "query"
     callback_path: str = "/"
@@ -117,7 +117,7 @@ class _CallbackServer(HTTPServer):
 class _CallbackHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
     server_version = "datamermaid"
-    #: Read timeout for the accepted socket; see :data:`HANDLER_TIMEOUT`.
+    #: Read timeout for the accepted socket; see [`HANDLER_TIMEOUT`][..HANDLER_TIMEOUT].
     #: ``handle_one_request`` turns the resulting ``TimeoutError`` into a
     #: closed connection, and the wait loop moves on to the next caller.
     timeout = HANDLER_TIMEOUT
@@ -155,9 +155,9 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 class LoopbackCallbackServer:
     """Serve exactly one OAuth redirect on ``127.0.0.1``.
 
-    The socket is bound as soon as the object is created so that
-    :attr:`redirect_uri` (and therefore the ephemeral port) is known before
-    the authorization URL is built.
+    The socket is bound as soon as the object is created, so the ephemeral port (and
+    therefore [`redirect_uri`][.redirect_uri]) is known before the authorization URL is
+    built.
     """
 
     def __init__(

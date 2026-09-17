@@ -1,20 +1,23 @@
 """The project-scoped endpoints, ``/projects/{project_id}/...``.
 
-Call the projects resource with a project id (or a :class:`~datamermaid.models.Project`)
-to get a :class:`ProjectContext`, the handle every nested route hangs off:
+Call the projects resource with a project id (or a
+[`Project`][datamermaid.models.Project]) to get a
+[`ProjectContext`][.ProjectContext], the handle every nested route hangs off:
 
-    >>> client.projects(project_id).sites.list()  # doctest: +SKIP
-    >>> client.projects(project_id).beltfish_methods.get(method_id)  # doctest: +SKIP
+```python
+client.projects(project_id).sites.list()
+client.projects(project_id).beltfish_methods.get(method_id)
+```
 
 Each collection behaves exactly like a top-level one: a lazy, filterable
-:class:`~datamermaid.pagination.PaginatedList` from ``.list(**filters)`` and a
+[`PaginatedList`][datamermaid.pagination.PaginatedList] from ``.list(**filters)`` and a
 single record from ``.get(id)``.  They differ only in their path, so each is a
-:class:`ProjectResource` declaring its route and model.
+[`ProjectResource`][.ProjectResource] declaring its route and model.
 
 The context also carries the aggregated views of
-:mod:`datamermaid.resources.aggregated` (``project.beltfishes.observations()``
-and its siblings), which are list-only and answer with flat rows rather than
-nested models.
+[`datamermaid.resources.aggregated`][datamermaid.resources.aggregated]
+(``project.beltfishes.observations()`` and its siblings), which are list-only and answer
+with flat rows rather than nested models.
 """
 
 from __future__ import annotations
@@ -78,18 +81,18 @@ __all__ = [
 ]
 
 M = TypeVar("M", bound=APIModel)
-#: A resource wrapper cached on a context, for :meth:`ProjectContext._resource`.
+#: A resource wrapper cached on a context, for `ProjectContext._resource`.
 R = TypeVar("R", bound="ProjectResource[Any]")
-#: An aggregated view family, for :meth:`ProjectContext._aggregated`.
+#: An aggregated view family, for `ProjectContext._aggregated`.
 A = TypeVar("A", bound=AggregatedFamilyResource)
 
 
 class ProjectResource(ReadOnlyResource[M]):
     """A read-only collection nested under one project.
 
-    Subclasses declare :attr:`route` and
-    :attr:`~datamermaid.resources.base.Resource.model`; the project id turns
-    the route into a path when the resource is built.
+    Subclasses declare [`route`][.route] and
+    [`model`][datamermaid.resources.base.Resource.model]; the project id turns the route
+    into a path when the resource is built.
     """
 
     #: Path segment below the project, e.g. ``"sites/"``.
@@ -156,9 +159,9 @@ class ProjectSampleEventsResource(ProjectResource[SampleEvent]):
 class ProjectFishBeltTransectsResource(ProjectResource[FishBeltTransect]):
     """The project's fish belt transects (``fishbelttransects/``).
 
-    The transects alone, without the observations recorded on them; for those
-    use :class:`ProjectBeltFishMethodsResource`.  Filters: ``sample_event``,
-    ``len_surveyed``, ``width``, ``depth``.
+    The transects alone, without the observations recorded on them; for those use
+    [`ProjectBeltFishMethodsResource`][..ProjectBeltFishMethodsResource].  Filters:
+    ``sample_event``, ``len_surveyed``, ``width``, ``depth``.
     """
 
     route = "fishbelttransects/"
@@ -247,20 +250,31 @@ PROJECT_RESOURCES: tuple[tuple[str, type[ProjectResource[Any]]], ...] = (
 class ProjectContext:
     """One project's data, as the collections nested under it.
 
-    Built by calling the projects resource, with an id or a
-    :class:`~datamermaid.models.Project`:
+    Built by calling the projects resource with an id or a
+    [`Project`][datamermaid.models.Project].  Nothing is requested when the context
+    is built, and each collection below it is a lazy list like every other
+    endpoint in the SDK.
 
-        >>> project = client.projects(project_id)  # doctest: +SKIP
-        >>> for site in project.sites.list():  # doctest: +SKIP
-        ...     print(site.name)
+    Args:
+        client: The client the nested requests are made through.
+        project: The project's id, or a [`Project`][datamermaid.models.Project].
 
-    The aggregated views of the seven protocols hang off the same handle, one
-    property per family:
+    Raises:
+        ValueError: If the project id is empty.
 
-        >>> project.beltfishes.observations().to_df()  # doctest: +SKIP
+    Attributes:
+        project_id: The id every route below this handle is built from.
 
-    Nothing is requested when the context is built; each collection is a lazy
-    list like every other endpoint in the SDK.
+    Example:
+        ```python
+        project = client.projects(project_id)
+
+        for site in project.sites.list():
+            print(site.name)
+
+        # The seven protocols' aggregated views hang off the same handle.
+        project.beltfishes.observations().to_df()
+        ```
     """
 
     def __init__(self, client: MermaidClient, project: str | Project) -> None:
@@ -381,7 +395,7 @@ class ProjectContext:
     # -- aggregated views -------------------------------------------------
     #
     # The denormalized observation / sample unit / sample event routes; see
-    # :mod:`datamermaid.resources.aggregated`.
+    # datamermaid/resources/aggregated.py.
 
     @property
     def beltfishes(self) -> AggregatedFamilyResource:
@@ -417,8 +431,10 @@ class ProjectContext:
     def bleachingqcs(self) -> BleachingQCFamilyResource:
         """Aggregated bleaching data, ``/projects/{id}/bleachingqcs/``.
 
-        Two observation views, :meth:`~BleachingQCFamilyResource.colonies_bleached`
-        and :meth:`~BleachingQCFamilyResource.quadrat_benthic_percent`.
+        Two observation views,
+        [`colonies_bleached`][datamermaid.resources.aggregated.BleachingQCFamilyResource.colonies_bleached]
+        and
+        [`quadrat_benthic_percent`][datamermaid.resources.aggregated.BleachingQCFamilyResource.quadrat_benthic_percent].
         """
 
         return self._aggregated(BLEACHINGQCS, BleachingQCFamilyResource)

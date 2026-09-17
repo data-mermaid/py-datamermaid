@@ -1,8 +1,8 @@
-"""OAuth 2.0 credentials for :class:`~datamermaid.client.MermaidClient`.
+"""OAuth 2.0 credentials for [`MermaidClient`][datamermaid.client.MermaidClient].
 
-:class:`OAuth` owns the boring half of logging in - picking a grant, caching
-the result, noticing expiry and refreshing - and delegates the interactive
-half to the flows in :mod:`datamermaid.auth.flows`.
+[`OAuth`][datamermaid.auth.oauth.OAuth] owns the boring half of logging in - picking a
+grant, caching the result, noticing expiry and refreshing - and delegates the
+interactive half to the flows in [`datamermaid.auth.flows`][datamermaid.auth.flows].
 """
 
 from __future__ import annotations
@@ -61,13 +61,46 @@ def is_headless() -> bool:
 class OAuth(Auth):
     """Log in to MERMAID through Auth0 and keep the token fresh.
 
-    Example:
-        >>> from datamermaid import MermaidClient, OAuth
-        >>> with MermaidClient(auth=OAuth(flow="device")) as client:  # doctest: +SKIP
-        ...     print(client.me().full_name)
+    The first request triggers a login unless a usable token is already cached.
+    Pass ``interactive=False`` to raise
+    [`AuthFlowError`][datamermaid.exceptions.AuthFlowError] instead of prompting, which
+    is what an unattended job wants.
 
-    The first request triggers a login unless a usable token is already
-    cached.  Pass ``interactive=False`` to fail instead of prompting.
+    Args:
+        flow: Which grant to run, or a [`Flow`][datamermaid.auth.flows.Flow]
+            instance.  ``"auto"`` picks ``pkce`` on a desktop and ``device``
+            (falling back to ``manual``) on a headless terminal.
+        domain: Auth0 tenant, e.g. ``datamermaid.auth0.com``.
+        client_id: Public Auth0 client id.
+        audience: API identifier the access token must be valid for.
+        scope: Space-separated OAuth scopes.  ``offline_access`` is what makes
+            a refresh token available.
+        cache: A [`TokenCache`][datamermaid.auth.token_cache.TokenCache], a path to
+            use instead of the default one, or ``False`` to keep tokens in
+            memory only.
+        redirect_port: Loopback port for the redirect-based grants.  ``0``
+            picks an ephemeral one, which needs the tenant to allow
+            port-agnostic callback URLs.
+        redirect_host: Host name used to build the redirect URI; the socket
+            always listens on ``127.0.0.1``.
+        timeout: Seconds to wait for the user to finish the login.
+        interactive: Whether a login may prompt.
+        env: Whether the ``MERMAID_*`` environment variables are consulted.
+
+    Raises:
+        ValueError: If ``flow`` names a grant that does not exist.
+
+    Attributes:
+        config: The resolved [`Auth0Config`][datamermaid.auth.config.Auth0Config].
+        cache: The token cache in use, or ``None``.
+
+    Example:
+        ```python
+        from datamermaid import MermaidClient, OAuth
+
+        with MermaidClient(auth=OAuth(flow="device")) as client:
+            print(client.me().full_name)
+        ```
     """
 
     def __init__(
@@ -292,7 +325,7 @@ class OAuth(Auth):
 def login(*, force: bool = False, **kwargs: Any) -> OAuth:
     """Log in to MERMAID and cache the tokens.
 
-    Any keyword :class:`OAuth` accepts may be passed through, e.g.
+    Any keyword [`OAuth`][datamermaid.auth.oauth.OAuth] accepts may be passed through, e.g.
     ``datamermaid.login(flow="device")``.  The returned object can be handed
     to ``MermaidClient(auth=...)``, though a plain ``MermaidClient()`` will
     also pick the cached tokens up.

@@ -66,7 +66,17 @@ uv run pytest tests/test_pagination.py
 uv run pytest -k "lazy"
 ```
 
+The documentation site lives in `docs/` and is configured by `mkdocs.yml`; its
+dependencies are the `docs` group rather than `dev`:
+
+```bash
+uv run --group docs mkdocs serve           # live-reloading preview on :8000
+uv run --group docs mkdocs build --strict  # what CI runs; warnings are failures
+```
+
 CI (`.github/workflows/ci.yml`) runs ruff, mypy, and pytest on Python 3.10-3.13.
+`.github/workflows/docs.yml` builds the site on every pull request and deploys
+it to GitHub Pages on pushes to `main`.
 
 ## Architecture Overview
 

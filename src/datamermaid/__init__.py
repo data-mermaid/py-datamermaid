@@ -1,16 +1,30 @@
 """Python SDK for the MERMAID coral reef monitoring API.
 
-Quickstart:
-    >>> from datamermaid import MermaidClient
-    >>> with MermaidClient(api_key="mmd_abc.def") as client:  # doctest: +SKIP
-    ...     print(client.me().full_name)
-    ...     projects = client.projects.list()
+Every endpoint is reached through `MermaidClient`, and every list route answers
+with a lazy, filterable collection that can be exported to a DataFrame.
 
-Without an API key, log in through the browser once and the token is reused:
-    >>> import datamermaid
-    >>> datamermaid.login()  # doctest: +SKIP
-    >>> with datamermaid.MermaidClient() as client:  # doctest: +SKIP
-    ...     print(client.me().full_name)
+Example:
+    ```python
+    from datamermaid import MermaidClient
+
+    with MermaidClient(api_key="mmd_abc.def") as client:
+        print(client.me().full_name)
+        for project in client.projects.list():
+            print(project.name, project.num_sites)
+    ```
+
+    Without an API key, log in through the browser once and the token is reused
+    by every later client:
+
+    ```python
+    import datamermaid
+
+    datamermaid.login()
+    with datamermaid.MermaidClient() as client:
+        print(client.me().full_name)
+    ```
+
+See the guides at <https://data-mermaid.github.io/py-datamermaid/> for the rest.
 """
 
 from __future__ import annotations

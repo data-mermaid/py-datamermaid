@@ -1,9 +1,9 @@
 """Typed representations of MERMAID API resources.
 
-Models are frozen dataclasses.  Every field is optional and every unrecognised
-key from the API lands in :attr:`APIModel.extra`, so a server-side addition can
-never break parsing.  Subclasses only need to declare fields; parsing and
-conversion are inherited from :class:`APIModel`.
+Models are frozen dataclasses.  Every field is optional and every unrecognised key from
+the API lands in [`APIModel.extra`][datamermaid.models.APIModel.extra], so a server-side
+addition can never break parsing.  Subclasses only need to declare fields; parsing and
+conversion are inherited from [`APIModel`][datamermaid.models.APIModel].
 """
 
 from __future__ import annotations
@@ -168,11 +168,12 @@ class APIModel:
     def from_api(cls: type[M], data: Mapping[str, Any]) -> M:
         """Build an instance from a decoded JSON object.
 
-        Keys the model does not declare are preserved in :attr:`extra`.  A value
-        that fails conversion is left in :attr:`extra` under its original key and
-        the declared field keeps its default, so nothing is silently dropped.
-        Converters also run for explicit JSON nulls, so a null collection becomes
-        an empty tuple rather than ``None``.
+        Keys the model does not declare are preserved in
+        [`extra`][datamermaid.models.APIModel.extra].  A value that fails conversion is
+        left in [`extra`][datamermaid.models.APIModel.extra] under its original key and
+        the declared field keeps its default, so nothing is silently dropped.  Converters
+        also run for explicit JSON nulls, so a null collection becomes an empty tuple
+        rather than ``None``.
         """
 
         if not isinstance(data, Mapping):
@@ -319,8 +320,9 @@ class Site(APIModel):
 class Management(APIModel):
     """A management regime (``GET /managements/``).
 
-    ``rules`` is the API's comma-separated summary of the seven rule flags
-    below it; :attr:`rule_flags` turns those flags back into a mapping.
+    ``rules`` is the API's comma-separated summary of the seven rule flags below it;
+    [`rule_flags`][datamermaid.models.Management.rule_flags] turns those flags back into
+    a mapping.
     """
 
     id: str | None = None
@@ -349,7 +351,7 @@ class Management(APIModel):
     created_by: str | None = None
     updated_by: str | None = None
 
-    #: The boolean fields summarised by :attr:`rules`.
+    #: The boolean fields summarised by [`rules`][datamermaid.models.Management.rules].
     RULE_FIELDS = (
         "no_take",
         "periodic_closure",
@@ -540,9 +542,9 @@ class InvertSpecies(APIModel):
 class SummarySampleEvent(APIModel):
     """A public summary of one sample event (``GET /summarysampleevents/``).
 
-    The per-protocol aggregates stay in :attr:`protocols`, a mapping of
-    protocol name (``beltfish``, ``benthicpit``, ...) to that protocol's
-    summary statistics, which vary by protocol and grow over time.
+    The per-protocol aggregates stay in [`protocols`][.protocols], a mapping of protocol
+    name (``beltfish``, ``benthicpit``, ...) to that protocol's summary statistics, which
+    vary by protocol and grow over time.
     """
 
     sample_event_id: str | None = None
@@ -641,7 +643,7 @@ class SampleEvent(APIModel):
 
     ``GET /projects/{project_id}/sampleevents/``.  Every sample unit belongs to
     one of these; ``site`` and ``management`` hold ids of records listed by
-    the project's :class:`~datamermaid.resources.project_context.ProjectContext`.
+    the project's [`ProjectContext`][datamermaid.resources.project_context.ProjectContext].
     """
 
     id: str | None = None
@@ -679,9 +681,10 @@ class Observer(APIModel):
 class ProjectProfile(APIModel):
     """A profile's membership of one project.
 
-    ``GET /projects/{project_id}/project_profiles/``.  ``role`` is the numeric
-    role (90 admin, 50 collector, 10 read-only), summarised by
-    :attr:`is_admin` and :attr:`is_collector`.
+    ``GET /projects/{project_id}/project_profiles/``.  ``role`` is the numeric role (90
+    admin, 50 collector, 10 read-only), summarised by
+    [`is_admin`][datamermaid.models.ProjectProfile.is_admin] and
+    [`is_collector`][.is_collector].
     """
 
     id: str | None = None
@@ -707,7 +710,7 @@ class SampleUnit(APIModel):
 
     The choice fields (``visibility``, ``current``, ``relative_depth``,
     ``tide``) hold ids from ``/choices/``; ``sample_event`` holds the id of the
-    :class:`SampleEvent` the unit was recorded under.
+    [`SampleEvent`][datamermaid.models.SampleEvent] the unit was recorded under.
     """
 
     id: str | None = None
@@ -786,10 +789,10 @@ class SampleUnitMethod(APIModel):
     """One protocol recorded on one sample unit.
 
     Subclasses name the protocol's sample unit and its observation lists; the
-    observations themselves stay as plain dictionaries, since they carry a
-    row per fish, point or colony and their columns differ by protocol.
-    :attr:`sample_unit` and :attr:`observations` reach both without knowing
-    which protocol is in hand.
+    observations themselves stay as plain dictionaries, since they carry a row per fish,
+    point or colony and their columns differ by protocol.
+    [`sample_unit`][.sample_unit] and [`observations`][.observations] reach both without
+    knowing which protocol is in hand.
     """
 
     id: str | None = None
@@ -822,7 +825,7 @@ class SampleUnitMethod(APIModel):
         """The protocol's observation lists, keyed by their ``obs_*`` field name.
 
         Lists the API adds later are picked up too, since they land in
-        :attr:`~APIModel.extra`.
+        [`extra`][datamermaid.models.APIModel.extra].
         """
 
         found: dict[str, tuple[Mapping[str, Any], ...]] = {}
@@ -970,16 +973,18 @@ class AggregatedRecord(APIModel):
     """One row from an aggregated view, kept deliberately thin.
 
     The observation, sample unit and sample event views under
-    ``/projects/{project_id}/beltfishes/``, ``/benthicpits/`` and their siblings
-    return wide, flat records: one row per observation (or per sample unit, or
-    per sample event) with every site, management and protocol column already
-    joined in.  The columns differ per protocol, per view and per API release,
-    so only the handful shared by all of them is declared here; the rest arrives
-    in :attr:`APIModel.extra` and :meth:`APIModel.to_dict` flattens it back out,
+    ``/projects/{project_id}/beltfishes/``, ``/benthicpits/`` and their siblings return
+    wide, flat records: one row per observation (or per sample unit, or per sample
+    event) with every site, management and protocol column already joined in.  The
+    columns differ per protocol, per view and per API release, so only the handful
+    shared by all of them is declared here; the rest arrives in
+    [`APIModel.extra`][datamermaid.models.APIModel.extra] and
+    [`APIModel.to_dict`][datamermaid.models.APIModel.to_dict] flattens it back out,
     which is what ``to_df()`` turns into one DataFrame column per field.
 
     The sample unit views have no ``id`` (they carry ``sample_unit_ids`` in
-    :attr:`extra` instead), so :attr:`id` is ``None`` on those rows.
+    [`extra`][datamermaid.models.AggregatedRecord.extra] instead), so
+    [`id`][datamermaid.models.AggregatedRecord.id] is ``None`` on those rows.
     """
 
     id: str | None = None

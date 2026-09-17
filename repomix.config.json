@@ -17,6 +17,7 @@
     "tests/**",
     "examples/**",
     "docs/**",
+    "mkdocs.yml",
     "*.md",
     "*.toml",
     "LICENSE"

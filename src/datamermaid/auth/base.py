@@ -1,8 +1,8 @@
-"""The :class:`Auth` seam and the non-interactive credential providers.
+"""The [`Auth`][datamermaid.auth.base.Auth] seam and the non-interactive credential providers.
 
 The client never inspects credentials directly: it only ever asks an
-:class:`Auth` instance to stamp an outgoing request.  The OAuth grants live
-in :mod:`datamermaid.auth.oauth`, which builds on the same seam.
+[`Auth`][datamermaid.auth.base.Auth] instance to stamp an outgoing request.  The OAuth grants live
+in [`datamermaid.auth.oauth`][datamermaid.auth.oauth], which builds on the same seam.
 """
 
 from __future__ import annotations
@@ -28,10 +28,11 @@ API_KEY_ENV_VAR = "MERMAID_API_KEY"
 class Auth(ABC):
     """Base class for credential providers.
 
-    Subclasses implement :meth:`apply`.  Implementations that hold expiring
-    credentials additionally override :meth:`refresh` and
-    :meth:`should_refresh`, which together give them a single retry after an
-    authentication failure.
+    Subclasses implement [`apply`][datamermaid.auth.base.Auth.apply].  Implementations
+    that hold expiring credentials additionally override
+    [`refresh`][datamermaid.auth.base.Auth.refresh] and
+    [`should_refresh`][.should_refresh], which together give them a single retry after
+    an authentication failure.
     """
 
     @abstractmethod
@@ -44,10 +45,11 @@ class Auth(ABC):
         return None
 
     def should_refresh(self, response: httpx.Response) -> bool:
-        """Whether ``response`` warrants a :meth:`refresh` and one retry.
+        """Whether ``response`` warrants refreshing the credentials and one retry.
 
-        The response body has not been read at this point, so implementations
-        must decide based on the status code and headers only.
+        The retry goes through [`refresh`][datamermaid.auth.base.Auth.refresh].  The
+        response body has not been read at this point, so implementations must decide
+        based on the status code and headers only.
         """
 
         return False
@@ -90,7 +92,7 @@ class APIKeyAuth(Auth):
 
 
 class HTTPXAuthAdapter(httpx.Auth):
-    """Bridge an :class:`Auth` into the ``httpx`` authentication protocol."""
+    """Bridge an [`Auth`][datamermaid.auth.base.Auth] into the ``httpx`` authentication protocol."""
 
     def __init__(self, auth: Auth) -> None:
         self.auth = auth
@@ -115,7 +117,7 @@ def resolve_auth(
 
     Precedence: explicit ``auth``, then ``api_key``, then the
     ``MERMAID_API_KEY`` environment variable, then tokens left behind by
-    :func:`datamermaid.login`, then anonymous access.
+    [`datamermaid.login`][datamermaid.auth.oauth.login], then anonymous access.
     """
 
     if auth is not None:
@@ -136,7 +138,7 @@ def resolve_auth(
 
 
 def _cached_oauth(*, env: bool) -> Auth | None:
-    """An :class:`~datamermaid.auth.oauth.OAuth` bound to cached tokens, if any.
+    """An [`OAuth`][datamermaid.auth.oauth.OAuth] bound to cached tokens, if any.
 
     Only a token that can still be used without asking the user anything
     counts: credentials picked up implicitly must never turn an ordinary data

@@ -159,7 +159,11 @@ class TokenSet:
 
 
 class TokenCache:
-    """A JSON file of token sets, keyed by :attr:`Auth0Config.cache_key`."""
+    """A JSON file of token sets, one entry per Auth0 cache key.
+
+    The key is
+    [`Auth0Config.cache_key`][datamermaid.auth.config.Auth0Config.cache_key].
+    """
 
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path is not None else default_cache_path()

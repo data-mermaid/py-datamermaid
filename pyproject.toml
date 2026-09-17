@@ -24,6 +24,7 @@ pandas = ["pandas>=2.0"]
 
 [project.urls]
 Homepage = "https://datamermaid.org/"
+Documentation = "https://data-mermaid.github.io/py-datamermaid/"
 Repository = "https://github.com/data-mermaid/py-datamermaid"
 
 [build-system]
@@ -42,6 +43,12 @@ dev = [
     # `tomllib` is stdlib from 3.11; tests/test_examples.py reads the examples'
     # PEP 723 metadata and still has to run on 3.10.
     "tomli>=2.0; python_version < '3.11'",
+]
+# The documentation site, built with `uv run --group docs mkdocs build`.  Kept
+# out of `dev` so the ordinary test loop does not install it.
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
 ]
 
 [tool.uv]

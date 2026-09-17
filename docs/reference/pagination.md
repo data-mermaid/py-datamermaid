@@ -1,0 +1,3 @@
+# Pagination
+
+::: datamermaid.pagination
