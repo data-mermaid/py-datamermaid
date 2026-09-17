@@ -39,7 +39,24 @@ from .exceptions import (
     RateLimitError,
     ServerError,
 )
-from .models import APIModel, Me, Project, ProjectMembership
+from .models import (
+    APIModel,
+    BenthicAttribute,
+    FishFamily,
+    FishGenus,
+    FishSize,
+    FishSpecies,
+    InvertAttribute,
+    InvertSpecies,
+    LabelMapping,
+    Management,
+    Me,
+    Project,
+    ProjectMembership,
+    ProjectTag,
+    Site,
+    SummarySampleEvent,
+)
 from .pagination import PaginatedList
 
 __all__ = [
@@ -54,6 +71,15 @@ __all__ = [
     "AuthFlowError",
     "AuthTimeoutError",
     "AuthenticationError",
+    "BenthicAttribute",
+    "FishFamily",
+    "FishGenus",
+    "FishSize",
+    "FishSpecies",
+    "InvertAttribute",
+    "InvertSpecies",
+    "LabelMapping",
+    "Management",
     "Me",
     "MermaidAPIError",
     "MermaidClient",
@@ -64,8 +90,11 @@ __all__ = [
     "PaginatedList",
     "Project",
     "ProjectMembership",
+    "ProjectTag",
     "RateLimitError",
     "ServerError",
+    "Site",
+    "SummarySampleEvent",
     "TokenCache",
     "TokenSet",
     "__version__",
