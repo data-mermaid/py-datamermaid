@@ -34,6 +34,12 @@ jobs:
       - name: Mypy
         run: uv run mypy src
 
+      # The examples are not importable modules (each is a standalone PEP 723
+      # script), so compiling them is the cheapest guard against them rotting.
+      # tests/test_examples.py checks their metadata and the index.
+      - name: Compile examples
+        run: uv run python -m compileall -q examples
+
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

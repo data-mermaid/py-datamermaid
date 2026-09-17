@@ -186,6 +186,9 @@ def page(results, next_url=None, count=None):
     }
 
 
+#: The repository root, for the tests that read files outside the package.
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
 

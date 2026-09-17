@@ -412,6 +412,18 @@ The socket itself always listens on `127.0.0.1` only. Use
 that RFC 8252 recommends rather than the `localhost` name. Neither setting
 matters for the `device` flow, which has no redirect at all.
 
+## Examples
+
+[`examples/`](examples/README.md) holds runnable versions of everything above:
+four scripts (API key quickstart, OAuth login, reference data, project data)
+and two [marimo](https://marimo.io) notebooks that serve themselves. Each file
+carries PEP 723 inline metadata, so no setup is needed beyond `uv`:
+
+```bash
+uv run examples/reference_data.py                   # public data, no credentials
+uv run examples/marimo/explore_projects.py          # serves the notebook
+```
+
 ## AI-friendly repo context
 
 The SDK - source, tests and the docs in this file - can be packed into a single
