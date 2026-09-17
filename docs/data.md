@@ -144,8 +144,9 @@ collection, use [`to_dataframe()`][datamermaid.pagination.to_dataframe]:
 ```python
 from datamermaid.pagination import to_dataframe
 
-first_page = client.fish_species.list(limit=50)
-to_dataframe(first_page.fetched)  # only what has been fetched so far
+fishes = client.fish_species.list(limit=50)
+fishes[0]  # force the first page; `.list()` on its own sends no request
+to_dataframe(fishes.fetched)  # only what has been fetched so far
 ```
 
 ## Reference data

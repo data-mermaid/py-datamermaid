@@ -78,8 +78,9 @@ Each collection below the handle is the same lazy
 | `project.bleachingqc_methods` | `bleachingquadratcollectionmethods/` | [`BleachingQuadratCollectionMethod`][datamermaid.models.BleachingQuadratCollectionMethod] |
 | `project.beltinvert_methods` | `beltinverttransectmethods/` | [`BeltInvertMethod`][datamermaid.models.BeltInvertMethod] |
 
-The handle is cached, so the same id always yields the same object and the
-collections below it keep whatever they have already fetched.
+The handle is cached, so the same id always yields the same object and the same
+collection wrappers; each `.list()` on one of them still returns a fresh lazy
+list that fetches from scratch.
 
 ## Sample units and their observations
 

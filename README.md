@@ -459,9 +459,9 @@ uv run --group docs mkdocs serve          # live-reloading preview on :8000
 uv run --group docs mkdocs build --strict # what CI runs; warnings are failures
 ```
 
-`tests/test_docs.py` resolves every code block on the site against the real SDK
-objects, so a renamed attribute fails the ordinary test run rather than shipping
-as confident-sounding prose.
+`tests/test_docs.py` resolves the attribute chains in every Python code block on
+the site against the real SDK objects, so a renamed attribute fails the ordinary
+test run rather than shipping as confident-sounding prose.
 
 ## Development
 
