@@ -148,8 +148,8 @@ WeightingMethod.AREA == "area"
 WeightingMethod.RATIO == "ratio"
 ```
 
-Pass `geometry_column` if the file has more than one geometry column, or names
-its geometry something the file's metadata does not point at.
+The service finds the geometry column in the file's metadata. Pass
+`geometry_column` to name a different one.
 
 ## STAC items
 
