@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import threading
+
 import httpx
+import pytest
 import respx
 
 from datamermaid import DEFAULT_BASE_URL, MermaidClient
@@ -95,3 +98,165 @@ def test_context_manager_closes_the_transport():
 def test_projects_resource_is_cached():
     with MermaidClient(api_key="mmd_x.y") as client:
         assert client.projects is client.projects
+
+
+# -- the cooperative throttle gate -------------------------------------------
+
+
+class FakeClock:
+    """A controllable `time.monotonic` and a `time.sleep` that only advances it."""
+
+    def __init__(self, now=1000.0):
+        self.now = now
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = FakeClock()
+    monkeypatch.setattr("datamermaid.client.time.monotonic", fake.monotonic)
+    monkeypatch.setattr("datamermaid.client.time.sleep", fake.sleep)
+    return fake
+
+
+def test_a_fresh_client_is_not_throttled(clock):
+    with MermaidClient() as client:
+        assert client._throttled_until == 0.0
+        client._wait_if_throttled()
+    assert clock.sleeps == []
+
+
+def test_note_throttle_sets_a_deadline_every_request_waits_on(clock):
+    with MermaidClient() as client:
+        client._note_throttle(2.0)
+        assert client._throttled_until == 1002.0
+
+        client._wait_if_throttled()
+        assert clock.sleeps == [2.0]
+        assert clock.now == 1002.0
+
+        # Once the deadline has passed nothing sleeps.
+        client._wait_if_throttled()
+        assert clock.sleeps == [2.0]
+
+
+def test_note_throttle_keeps_the_later_deadline(clock):
+    with MermaidClient() as client:
+        client._note_throttle(5.0)
+        client._note_throttle(1.0)
+        assert client._throttled_until == 1005.0
+        clock.now = 1003.0
+        client._wait_if_throttled()
+    assert clock.sleeps == [2.0]
+
+
+def test_a_zero_delay_does_not_throttle(clock):
+    with MermaidClient() as client:
+        client._note_throttle(0.0)
+        client._wait_if_throttled()
+    assert clock.sleeps == []
+
+
+@respx.mock
+def test_a_429_records_the_retry_after_as_the_throttle_deadline(clock):
+    route = respx.get(f"{BASE_URL}projects/").mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "2"}),
+            httpx.Response(200, json={"count": 0, "next": None, "results": []}),
+        ]
+    )
+    with MermaidClient(backoff_factor=0.0) as client:
+        client.request("GET", "projects/")
+        # The retry slept the delay out, so the deadline is already behind us.
+        assert client._throttled_until == 1002.0
+        assert clock.now >= 1002.0
+    assert route.call_count == 2
+    assert clock.sleeps == [2.0]
+
+
+@respx.mock
+def test_a_5xx_retries_without_throttling_other_requests(clock):
+    respx.get(f"{BASE_URL}projects/").mock(
+        side_effect=[httpx.Response(503), httpx.Response(200, json={})]
+    )
+    with MermaidClient(backoff_factor=0.5) as client:
+        client.request("GET", "projects/")
+        assert client._throttled_until == 0.0
+    assert len(clock.sleeps) == 1
+
+
+@respx.mock
+def test_a_429_on_one_thread_makes_another_thread_wait(monkeypatch):
+    """The scenario the gate exists for: two workers, one 429, both back off."""
+
+    lock = threading.Lock()
+    clock = FakeClock()
+    sends = []
+
+    def monotonic():
+        with lock:
+            return clock.now
+
+    def sleep(seconds):
+        with lock:
+            clock.sleeps.append(seconds)
+            clock.now += seconds
+
+    monkeypatch.setattr("datamermaid.client.time.monotonic", monotonic)
+    monkeypatch.setattr("datamermaid.client.time.sleep", sleep)
+
+    # Thread A's first attempt is answered 429 while thread B is held at the
+    # door.  B only knocks after A has noted the throttle, so B must wait.
+    throttle_noted = threading.Event()
+    b_may_send = threading.Event()
+
+    def respond(request):
+        with lock:
+            sends.append((request.url.path, clock.now))
+        if request.url.path == "/v1/a/" and not throttle_noted.is_set():
+            return httpx.Response(429, headers={"Retry-After": "2"})
+        return httpx.Response(200, json={})
+
+    respx.get(f"{BASE_URL}a/").mock(side_effect=respond)
+    respx.get(f"{BASE_URL}b/").mock(side_effect=respond)
+
+    with MermaidClient(backoff_factor=0.0) as client:
+        original_note = client._note_throttle
+
+        def note_and_release(delay):
+            original_note(delay)
+            throttle_noted.set()
+            b_may_send.wait(5.0)
+
+        monkeypatch.setattr(client, "_note_throttle", note_and_release)
+
+        def run_a():
+            client.request("GET", "a/")
+
+        def run_b():
+            throttle_noted.wait(5.0)
+            client.request("GET", "b/")
+
+        a = threading.Thread(target=run_a)
+        b = threading.Thread(target=run_b)
+        a.start()
+        b.start()
+        # B waits at the gate (sleeping on the fake clock) before A's own sleep.
+        b.join(5.0)
+        b_may_send.set()
+        a.join(5.0)
+        assert not a.is_alive() and not b.is_alive()
+
+    first_a = next(at for path, at in sends if path == "/v1/a/")
+    sent_b = next(at for path, at in sends if path == "/v1/b/")
+    retry_a = [at for path, at in sends if path == "/v1/a/"][1]
+    assert 2.0 in clock.sleeps
+    assert sent_b >= first_a + 2.0
+    assert retry_a >= first_a + 2.0

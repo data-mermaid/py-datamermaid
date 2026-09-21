@@ -123,6 +123,7 @@ def test_pages_are_discovered():
         "index.md",
         "projects.md",
         "reference/auth.md",
+        "reference/batch.md",
         "reference/client.md",
         "reference/exceptions.md",
         "reference/index.md",

@@ -110,4 +110,5 @@ nav:
       - Resources: reference/resources.md
       - Models: reference/models.md
       - Pagination: reference/pagination.md
+      - Batches: reference/batch.md
       - Exceptions: reference/exceptions.md

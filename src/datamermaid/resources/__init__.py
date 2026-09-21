@@ -46,7 +46,7 @@ from .reference import (
     SitesResource,
     SummarySampleEventsResource,
 )
-from .zonal_stats import RasterStatsEndpoint, ZonalStatsEndpoint, ZonalStatsResource
+from .zonal_stats import BatchItem, RasterStatsEndpoint, ZonalStatsEndpoint, ZonalStatsResource
 
 __all__ = [
     "AGGREGATED_FAMILIES",
@@ -55,6 +55,7 @@ __all__ = [
     "AggregatedFamilyResource",
     "AggregatedViewFamily",
     "BaseResource",
+    "BatchItem",
     "BenthicAttributesResource",
     "BleachingQCFamilyResource",
     "ChoicesResource",

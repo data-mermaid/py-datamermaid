@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import random
+import threading
 import time
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
@@ -97,6 +98,12 @@ class MermaidClient:
 
     Use it as a context manager so the connection pool is closed.
 
+    The client is safe to share between threads, which is how a
+    [`LazyBatch`][datamermaid.batch.LazyBatch] fans requests out.  Throttling is
+    cooperative: a ``429`` seen on any thread sets a client-wide deadline
+    (``Retry-After``, or the computed backoff) that every request waits on before
+    it is sent, so the workers back off together instead of one at a time.
+
     Args:
         auth: Credential provider.  Mutually exclusive with ``api_key``.
         api_key: A MERMAID API key, ``mmd_<key_id>.<secret>``.  Defaults to
@@ -186,6 +193,10 @@ class MermaidClient:
             transport=transport,
         )
         self._resources: dict[type[Any], Any] = {}
+        # Cooperative throttle: a `time.monotonic()` deadline before which no
+        # request may be sent, shared by every thread using this client.
+        self._throttle_lock = threading.Lock()
+        self._throttled_until = 0.0
 
     # -- lifecycle --------------------------------------------------------
 
@@ -395,6 +406,25 @@ class MermaidClient:
         backoff = self.backoff_factor * (2.0**attempt)
         return min(backoff + random.uniform(0, self.backoff_factor), MAX_BACKOFF)
 
+    def _wait_if_throttled(self) -> None:
+        """Sleep until the client-wide throttle deadline has passed, if it has not."""
+
+        with self._throttle_lock:
+            remaining = self._throttled_until - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+
+    def _note_throttle(self, delay: float) -> None:
+        """Record that the service asked for ``delay`` seconds of quiet.
+
+        Every request on every thread waits for the deadline before sending.  A
+        later deadline wins over an earlier one; a shorter one never brings it
+        forward.
+        """
+
+        with self._throttle_lock:
+            self._throttled_until = max(self._throttled_until, time.monotonic() + delay)
+
     def request(
         self,
         method: str,
@@ -412,6 +442,7 @@ class MermaidClient:
 
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            self._wait_if_throttled()
             response: httpx.Response | None = None
             try:
                 response = self._http.request(method, url, params=params, json=json, **kwargs)
@@ -424,7 +455,10 @@ class MermaidClient:
                     raise_for_status(response)
                     return response
 
-            time.sleep(self._retry_delay(attempt, response))
+            delay = self._retry_delay(attempt, response)
+            if response is not None and response.status_code == 429:
+                self._note_throttle(delay)
+            time.sleep(delay)
 
         # Unreachable: the final attempt either returns or raises above.
         raise MermaidConnectionError(f"{method} {url} failed") from last_error
