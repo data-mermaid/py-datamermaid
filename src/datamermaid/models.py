@@ -316,6 +316,25 @@ class Site(APIModel):
     created_by: str | None = None
     updated_by: str | None = None
 
+    @property
+    def __geo_interface__(self) -> Mapping[str, Any]:
+        """The ``location`` as GeoJSON, so a site can be handed to shapely, geopandas or
+        [`to_aoi`][datamermaid.geometry.to_aoi] directly.
+
+        Raises:
+            ValueError: If the site has no ``location``.
+            TypeError: If ``location`` is not a GeoJSON mapping.
+        """
+
+        if self.location is None:
+            raise ValueError(f"site {self.name or self.id!r} has no location")
+        if not isinstance(self.location, Mapping):
+            raise TypeError(
+                f"site {self.name or self.id!r} location is not a GeoJSON mapping: "
+                f"{type(self.location).__name__}"
+            )
+        return self.location
+
 
 @dataclass(frozen=True)
 class Management(APIModel):
@@ -368,6 +387,24 @@ class Management(APIModel):
         """The individual management rules, keyed by name."""
 
         return {name: getattr(self, name) for name in self.RULE_FIELDS}
+
+    @property
+    def __geo_interface__(self) -> Mapping[str, Any]:
+        """The ``boundary`` as GeoJSON, for shapely, geopandas and the like.
+
+        Raises:
+            ValueError: If the management regime has no ``boundary``.
+            TypeError: If ``boundary`` is not a GeoJSON mapping.
+        """
+
+        if self.boundary is None:
+            raise ValueError(f"management {self.name or self.id!r} has no boundary")
+        if not isinstance(self.boundary, Mapping):
+            raise TypeError(
+                f"management {self.name or self.id!r} boundary is not a GeoJSON mapping: "
+                f"{type(self.boundary).__name__}"
+            )
+        return self.boundary
 
 
 @dataclass(frozen=True)

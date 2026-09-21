@@ -5,10 +5,10 @@ from datetime import timezone
 
 import pytest
 
-from datamermaid import Me, Project
+from datamermaid import Management, Me, Project, Site
 from datamermaid.models import parse_datetime
 
-from .conftest import project_payload
+from .conftest import project_payload, project_scoped_payload
 
 
 def test_known_fields_are_typed():
@@ -96,3 +96,26 @@ def test_parse_datetime_handles_z_suffix_and_offsets():
 def test_parse_datetime_rejects_other_types():
     with pytest.raises(TypeError):
         parse_datetime(12345)
+
+
+def test_site_geo_interface_is_its_location():
+    location = {"type": "Point", "coordinates": [179.2251, -17.97855]}
+    site = Site.from_api(project_scoped_payload("sites"))
+    assert site.__geo_interface__ == location
+    assert Site(location=location).__geo_interface__ is location
+
+
+def test_site_geo_interface_without_a_location_names_the_site():
+    with pytest.raises(ValueError, match="Anthias Avenue"):
+        _ = Site(id="s1", name="Anthias Avenue").__geo_interface__
+    with pytest.raises(TypeError, match="GeoJSON mapping"):
+        _ = Site(id="s1", location="POINT(1 2)").__geo_interface__
+
+
+def test_management_geo_interface_is_its_boundary():
+    boundary = {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}
+    assert Management(boundary=boundary).__geo_interface__ is boundary
+    with pytest.raises(ValueError, match="Gau_open"):
+        _ = Management.from_api(project_scoped_payload("managements")).__geo_interface__
+    with pytest.raises(ValueError, match="'m1'"):
+        _ = Management(id="m1").__geo_interface__

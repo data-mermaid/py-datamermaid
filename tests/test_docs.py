@@ -126,6 +126,7 @@ def test_pages_are_discovered():
         "reference/batch.md",
         "reference/client.md",
         "reference/exceptions.md",
+        "reference/geometry.md",
         "reference/index.md",
         "reference/models.md",
         "reference/pagination.md",
