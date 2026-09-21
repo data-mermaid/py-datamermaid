@@ -23,6 +23,38 @@
       "data_area": 781250.0
     }
   },
+  "raster_stac": {
+    "band_1": {
+      "mean": 3.1,
+      "count": 40,
+      "aoi_area": 785398.16,
+      "data_area": 781250.0
+    },
+    "band_2": {
+      "mean": 7.25,
+      "count": 40,
+      "aoi_area": 785398.16,
+      "data_area": 781250.0
+    }
+  },
+  "vector": {
+    "depth": {
+      "min": 4.0,
+      "max": 18.5,
+      "mean": 11.2,
+      "count": 12,
+      "aoi_area": 785398.16,
+      "data_area": 612000.0
+    },
+    "slope": {
+      "min": 0.5,
+      "max": 9.0,
+      "mean": 3.4,
+      "count": 12,
+      "aoi_area": 785398.16,
+      "data_area": 612000.0
+    }
+  },
   "validation_error": {
     "detail": [
       {
