@@ -41,7 +41,14 @@ from .auth import (
     login,
     logout,
 )
-from .client import BASE_URL_ENV_VAR, DEFAULT_BASE_URL, DEV_BASE_URL, MermaidClient
+from .client import (
+    BASE_URL_ENV_VAR,
+    DEFAULT_BASE_URL,
+    DEFAULT_ZONAL_STATS_URL,
+    DEV_BASE_URL,
+    ZONAL_STATS_URL_ENV_VAR,
+    MermaidClient,
+)
 from .exceptions import (
     AuthenticationError,
     AuthFlowError,
@@ -89,6 +96,7 @@ from .models import (
     Site,
     SummarySampleEvent,
     Transect,
+    ZonalStatsResult,
 )
 from .pagination import PaginatedList
 from .resources import (
@@ -101,7 +109,9 @@ from .resources import (
 __all__ = [
     "BASE_URL_ENV_VAR",
     "DEFAULT_BASE_URL",
+    "DEFAULT_ZONAL_STATS_URL",
     "DEV_BASE_URL",
+    "ZONAL_STATS_URL_ENV_VAR",
     "APIKeyAuth",
     "APIModel",
     "AggregatedFamilyResource",
@@ -159,6 +169,7 @@ __all__ = [
     "TokenCache",
     "TokenSet",
     "Transect",
+    "ZonalStatsResult",
     "__version__",
     "login",
     "logout",

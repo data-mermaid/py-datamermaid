@@ -33,3 +33,7 @@ they are used.
 ## Profile
 
 ::: datamermaid.resources.me
+
+## Zonal statistics
+
+::: datamermaid.resources.zonal_stats

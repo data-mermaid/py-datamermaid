@@ -8,7 +8,7 @@ conversion are inherited from [`APIModel`][datamermaid.models.APIModel].
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from datetime import date, datetime, timezone
 from typing import Any, ClassVar, TypeVar
@@ -49,6 +49,7 @@ __all__ = [
     "Site",
     "SummarySampleEvent",
     "Transect",
+    "ZonalStatsResult",
     "parse_date",
     "parse_datetime",
 ]
@@ -995,3 +996,115 @@ class AggregatedRecord(APIModel):
     sample_date: date | None = field(default=None, metadata=_api_meta(converter=parse_date))
     management_id: str | None = None
     sample_event_id: str | None = None
+
+
+#
+# The Zonal Stats service, a separate host answering with dynamic keys.
+
+
+@dataclass(frozen=True)
+class ZonalStatsResult:
+    """Statistics for one area of interest against one raster or vector source.
+
+    The Zonal Stats API answers with an object keyed by band (``band_1``) or, for
+    vector sources, by column name, each holding the requested statistics:
+
+    ```json
+    {"band_1": {"mean": 12.3, "count": 40, "aoi_area": 785398.2}}
+    ```
+
+    Those keys are dynamic, so this is a plain frozen dataclass rather than an
+    [`APIModel`][datamermaid.models.APIModel]: [`stats`][.stats] holds the response
+    as sent, and the result reads like a mapping (``result["band_1"]["mean"]``).
+    [`aoi`][.aoi] and [`source`][.source] record what was asked for, and
+    [`label`][.label] is whatever identifier the caller attached, so a batch of
+    results can be told apart once flattened.
+
+    [`to_dict`][.to_dict] gives one wide row (``band_1_mean``, ``band_1_count``,
+    ...) so [`to_dataframe`][datamermaid.pagination.to_dataframe] works on a list of
+    results, and [`to_records`][.to_records] gives long ``(label, band, stat, value)``
+    rows for reshaping.
+    """
+
+    #: Band (or column) name -> statistic name -> value, as the API returned it.
+    stats: Mapping[str, Mapping[str, Any]]
+    #: The GeoJSON geometry sent as the area of interest.
+    aoi: Mapping[str, Any]
+    #: The raster or vector URL the statistics were computed from.
+    source: str
+    #: Caller-supplied identifier, carried through unchanged.
+    label: Any = None
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Mapping[str, Any],
+        *,
+        aoi: Mapping[str, Any],
+        source: str,
+        label: Any = None,
+    ) -> ZonalStatsResult:
+        """Build a result from a decoded response body.
+
+        Every top-level value must itself be an object of statistics; anything
+        else means the body is not a zonal stats response.
+        """
+
+        if not isinstance(data, Mapping):
+            raise TypeError(f"expected a JSON object, got {type(data).__name__}")
+        stats: dict[str, Mapping[str, Any]] = {}
+        for band, values in data.items():
+            if not isinstance(values, Mapping):
+                raise TypeError(
+                    f"expected an object of statistics for {band!r}, got {type(values).__name__}"
+                )
+            stats[str(band)] = dict(values)
+        return cls(stats=stats, aoi=dict(aoi), source=source, label=label)
+
+    # -- mapping interface --------------------------------------------------
+
+    def __getitem__(self, band: str) -> Mapping[str, Any]:
+        return self.stats[band]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.stats)
+
+    def __len__(self) -> int:
+        return len(self.stats)
+
+    def __contains__(self, band: object) -> bool:
+        return band in self.stats
+
+    def keys(self) -> Sequence[str]:
+        """The band or column names in the response, in order."""
+
+        return list(self.stats)
+
+    def items(self) -> Sequence[tuple[str, Mapping[str, Any]]]:
+        """``(band, statistics)`` pairs, in response order."""
+
+        return list(self.stats.items())
+
+    # -- export -------------------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """Flatten into one wide row: ``label``, ``source``, then ``<band>_<stat>``.
+
+        ``label`` is always present (``None`` when the caller gave none) so a
+        DataFrame built from many results has a stable set of columns.
+        """
+
+        row: dict[str, Any] = {"label": self.label, "source": self.source}
+        for band, values in self.stats.items():
+            for stat, value in values.items():
+                row[f"{band}_{stat}"] = value
+        return row
+
+    def to_records(self) -> list[dict[str, Any]]:
+        """One long ``{label, band, stat, value}`` row per statistic."""
+
+        return [
+            {"label": self.label, "band": band, "stat": stat, "value": value}
+            for band, values in self.stats.items()
+            for stat, value in values.items()
+        ]

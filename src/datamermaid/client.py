@@ -33,12 +33,23 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         SitesResource,
         SummarySampleEventsResource,
     )
+    from .resources.zonal_stats import ZonalStatsResource
 
-__all__ = ["BASE_URL_ENV_VAR", "DEFAULT_BASE_URL", "DEV_BASE_URL", "MermaidClient"]
+__all__ = [
+    "BASE_URL_ENV_VAR",
+    "DEFAULT_BASE_URL",
+    "DEFAULT_ZONAL_STATS_URL",
+    "DEV_BASE_URL",
+    "ZONAL_STATS_URL_ENV_VAR",
+    "MermaidClient",
+]
 
 DEFAULT_BASE_URL = "https://api.datamermaid.org/v1/"
 DEV_BASE_URL = "https://dev-api.datamermaid.org/v1/"
 BASE_URL_ENV_VAR = "MERMAID_API_URL"
+
+DEFAULT_ZONAL_STATS_URL = "https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/"
+ZONAL_STATS_URL_ENV_VAR = "MERMAID_ZONAL_STATS_URL"
 
 #: A resource wrapper cached on the client, for `MermaidClient._resource`.
 R = TypeVar("R", bound="BaseResource")
@@ -59,6 +70,15 @@ def resolve_base_url(base_url: str | None = None) -> str:
     """Resolve the API root: explicit argument, then env var, then default."""
 
     candidate = base_url or os.environ.get(BASE_URL_ENV_VAR, "").strip() or DEFAULT_BASE_URL
+    return candidate if candidate.endswith("/") else f"{candidate}/"
+
+
+def resolve_zonal_stats_url(url: str | None = None) -> str:
+    """Resolve the Zonal Stats service root: argument, then env var, then default."""
+
+    candidate = (
+        url or os.environ.get(ZONAL_STATS_URL_ENV_VAR, "").strip() or DEFAULT_ZONAL_STATS_URL
+    )
     return candidate if candidate.endswith("/") else f"{candidate}/"
 
 
@@ -85,6 +105,10 @@ class MermaidClient:
         base_url: API root.  Defaults to ``MERMAID_API_URL``, then to
             [`DEFAULT_BASE_URL`][datamermaid.client.DEFAULT_BASE_URL].  A trailing slash
             is added if missing.
+        zonal_stats_url: Root of the separate Zonal Stats service.  Defaults to
+            ``MERMAID_ZONAL_STATS_URL``, then to
+            [`DEFAULT_ZONAL_STATS_URL`][datamermaid.client.DEFAULT_ZONAL_STATS_URL].  A
+            trailing slash is added if missing.
         timeout: Seconds, or an ``httpx.Timeout`` for per-phase control.
         max_retries: Extra attempts after a 429 or 5xx.  ``0`` disables retrying.
         backoff_factor: Base delay of the exponential backoff, in seconds.
@@ -100,6 +124,7 @@ class MermaidClient:
     Attributes:
         auth: The credential provider in use.
         base_url: The resolved API root, always ending in ``/``.
+        zonal_stats_url: The resolved Zonal Stats service root, always ending in ``/``.
         max_retries: Extra attempts made after a retryable status code.
         backoff_factor: Base delay of the exponential backoff, in seconds.
 
@@ -128,6 +153,7 @@ class MermaidClient:
         auth: Auth | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        zonal_stats_url: str | None = None,
         timeout: float | httpx.Timeout = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
@@ -140,6 +166,7 @@ class MermaidClient:
 
         self.auth = resolve_auth(auth, api_key)
         self.base_url = resolve_base_url(base_url)
+        self.zonal_stats_url = resolve_zonal_stats_url(zonal_stats_url)
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
 
@@ -306,6 +333,18 @@ class MermaidClient:
         from .resources.reference import LabelMappingsResource
 
         return self._resource(LabelMappingsResource)
+
+    @property
+    def zonal_stats(self) -> ZonalStatsResource:
+        """The Zonal Stats service, a separate public host (``client.zonal_stats.raster``).
+
+        Requests to it carry no MERMAID credentials.  See
+        [`ZonalStatsResource`][datamermaid.resources.zonal_stats.ZonalStatsResource].
+        """
+
+        from .resources.zonal_stats import ZonalStatsResource
+
+        return self._resource(ZonalStatsResource)
 
     @overload
     def choices(self) -> dict[str, list[dict[str, Any]]]: ...
