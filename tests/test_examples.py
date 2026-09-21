@@ -54,7 +54,7 @@ def script_metadata(source: str) -> dict:
 def test_examples_are_discovered():
     """A wrong directory here would make every other test vacuously pass."""
 
-    assert len(SCRIPTS) == 4
+    assert len(SCRIPTS) == 5
     assert len(NOTEBOOKS) == 2
 
 

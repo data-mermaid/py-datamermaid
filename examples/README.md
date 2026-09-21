@@ -36,11 +36,17 @@ set them instead of raising.
 | [`oauth_login.py`](oauth_login.py) | Interactive login and token cache, including the device flow for SSH sessions | `uv run examples/oauth_login.py` |
 | [`reference_data.py`](reference_data.py) | Public fish and benthic taxonomies as DataFrames, joined to the `/choices/` vocabularies | `uv run examples/reference_data.py` |
 | [`project_data.py`](project_data.py) | One project's sites, sample events and fish belt observations as DataFrames | `uv run examples/project_data.py --project-id <uuid>` |
+| [`zonal_stats.py`](zonal_stats.py) | Raster statistics around every site of one project, batched in parallel | `uv run examples/zonal_stats.py --url <cog-url>` |
 
 `project_data.py` takes `--project-id` (defaulting to `$MERMAID_PROJECT_ID`, and
 otherwise to the first project the credentials can see), `--limit` and
 `--sample-date-after`. `oauth_login.py` takes `--flow`, `--force` and
 `--logout`.
+
+`zonal_stats.py` takes the same `--project-id`, plus a required `--url` (a Cloud
+Optimized GeoTIFF the Zonal Stats service can read), `--stats`, `--radius`,
+`--max-workers` and `--limit`. The service itself is public: only the project's
+sites need credentials.
 
 ## Marimo notebooks
 

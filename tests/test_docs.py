@@ -41,11 +41,14 @@ from datamermaid import (
     Site,
     SummarySampleEvent,
     TokenSet,
+    ZonalStatsResult,
 )
+from datamermaid.batch import LazyBatch
 from datamermaid.models import BeltFishMethod
 from datamermaid.resources.aggregated import AggregatedFamilyResource
 from datamermaid.resources.base import Resource
 from datamermaid.resources.projects import ProjectsResource
+from datamermaid.resources.zonal_stats import ZonalStatsEndpoint, ZonalStatsResource
 
 from .conftest import BASE_URL, PROJECT_ID, REPO_ROOT, page
 
@@ -131,6 +134,7 @@ def test_pages_are_discovered():
         "reference/models.md",
         "reference/pagination.md",
         "reference/resources.md",
+        "zonal_stats.md",
     ]
     assert len(PYTHON_BLOCKS) > 30
 
@@ -186,9 +190,31 @@ def test_documented_imports_exist(block):
 
 @dataclass(frozen=True)
 class ListOf:
-    """A :class:`PaginatedList` (or tuple) whose items are ``item``."""
+    """A lazy collection (or tuple) whose items are ``item``.
+
+    ``container`` is the class an attribute on the collection itself is looked
+    up on: a [`PaginatedList`][datamermaid.pagination.PaginatedList] for a list
+    route, a [`LazyBatch`][datamermaid.batch.LazyBatch] for a zonal stats batch,
+    which answers ``fetched``, ``max_workers`` and ``to_df`` of its own.
+    """
 
     item: type
+    container: type = PaginatedList
+
+
+def _item(model: type) -> Any:
+    """One value of ``model``, prepared enough for a chain to continue through it.
+
+    A model builds from its defaults; a [`ZonalStatsResult`][datamermaid.models.ZonalStatsResult]
+    is a plain dataclass with required fields, so it is given empty ones; anything
+    else stands for itself.
+    """
+
+    if _is_model(model):
+        return model()
+    if model is ZonalStatsResult:
+        return ZonalStatsResult(stats={}, aoi={}, source="")
+    return model
 
 
 def _model_attribute(model: type[APIModel], name: str) -> Any:
@@ -241,6 +267,16 @@ def _call_result(target: Any, name: str) -> Any:
             return target.model()
     if isinstance(target, MermaidClient) and name == "me":
         return Me()
+    # `client.zonal_stats.raster(aoi, url=...)` is the endpoint's `__call__`.
+    if isinstance(target, ZonalStatsResource) and isinstance(
+        getattr(target, name, None), ZonalStatsEndpoint
+    ):
+        return _item(ZonalStatsResult)
+    if isinstance(target, ZonalStatsEndpoint):
+        if name == "stats":
+            return _item(ZonalStatsResult)
+        if name == "batch":
+            return ListOf(ZonalStatsResult, container=LazyBatch)
     if isinstance(target, PaginatedList) and name == "to_df":
         return None
     return None
@@ -290,7 +326,7 @@ class ChainResolver:
 
     def _one_attribute(self, target: Any, name: str) -> Any:
         if isinstance(target, ListOf):
-            target = PaginatedList
+            target = target.container
         if isinstance(target, APIModel):
             return _model_attribute(type(target), name)
         if not hasattr(target, name):
@@ -325,7 +361,7 @@ class ChainResolver:
         items = []
         for target in self.resolve(node.value, where):
             if isinstance(target, ListOf):
-                items.append(target.item() if _is_model(target.item) else target.item)
+                items.append(_item(target.item))
         return tuple(items)
 
 
@@ -350,11 +386,13 @@ def roots():
             "project": (ProjectContext(client, PROJECT_ID), Project()),
             "acanthuridae": (FishFamily(),),
             "auth": (APIKeyAuth("mmd_key.secret"), oauth),
+            "batch": (ListOf(ZonalStatsResult, container=LazyBatch),),
             "first_page": (ListOf(FishSpecies),),
             "genus": (FishGenus(),),
             "me": (Me(),),
             "member": (ProjectProfile(),),
             "oauth": (oauth,),
+            "result": (_item(ZonalStatsResult),),
             "row": (AggregatedRecord(),),
             "site": (Site(),),
             "species": (FishSpecies(), ListOf(FishSpecies)),
@@ -384,6 +422,14 @@ def test_the_resolver_catches_a_typo(roots):
     with pytest.raises(AssertionError, match="no attribute 'displayname'"):
         ChainResolver(roots).check(
             ast.parse("client.fish_species.list()[0].displayname"), "made up"
+        )
+
+    with pytest.raises(AssertionError, match="no attribute 'rastor'"):
+        ChainResolver(roots).check(ast.parse("client.zonal_stats.rastor.stats(site)"), "made up")
+
+    with pytest.raises(AssertionError, match="no attribute 'labell'"):
+        ChainResolver(roots).check(
+            ast.parse("client.zonal_stats.raster.batch(sites, url=cog)[0].labell"), "made up"
         )
 
 

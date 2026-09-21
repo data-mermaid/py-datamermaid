@@ -1,7 +1,7 @@
 # Examples
 
 The repository's [`examples/`](https://github.com/data-mermaid/py-datamermaid/tree/main/examples)
-directory holds runnable versions of everything in these guides: four scripts
+directory holds runnable versions of everything in these guides: five scripts
 and two [marimo](https://marimo.io) notebooks.
 
 Each file carries its own [PEP 723](https://peps.python.org/pep-0723/) inline
@@ -43,10 +43,16 @@ See [Authentication](authentication.md) for the details.
 | [`oauth_login.py`](https://github.com/data-mermaid/py-datamermaid/blob/main/examples/oauth_login.py) | Interactive login and token cache, including the device flow for SSH sessions | `uv run examples/oauth_login.py` |
 | [`reference_data.py`](https://github.com/data-mermaid/py-datamermaid/blob/main/examples/reference_data.py) | Public fish and benthic taxonomies as DataFrames, joined to the `/choices/` vocabularies | `uv run examples/reference_data.py` |
 | [`project_data.py`](https://github.com/data-mermaid/py-datamermaid/blob/main/examples/project_data.py) | One project's sites, sample events and fish belt observations as DataFrames | `uv run examples/project_data.py --project-id <uuid>` |
+| [`zonal_stats.py`](https://github.com/data-mermaid/py-datamermaid/blob/main/examples/zonal_stats.py) | Raster statistics around every site of one project, batched in parallel | `uv run examples/zonal_stats.py --url <cog-url>` |
 
 `project_data.py` takes `--project-id` (defaulting to `$MERMAID_PROJECT_ID`, and
 otherwise to the first project the credentials can see), `--limit` and
 `--sample-date-after`. `oauth_login.py` takes `--flow`, `--force` and `--logout`.
+
+`zonal_stats.py` takes the same `--project-id`, plus a required `--url` (a Cloud
+Optimized GeoTIFF the [Zonal Stats service](zonal_stats.md) can read), `--stats`,
+`--radius`, `--max-workers` and `--limit`. That service is public, so only the
+project's sites need credentials.
 
 ## Marimo notebooks
 

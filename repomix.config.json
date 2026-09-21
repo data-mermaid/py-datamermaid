@@ -3,7 +3,7 @@
   "output": {
     "filePath": "repomix-output.xml",
     "style": "xml",
-    "headerText": "datamermaid - a typed Python SDK for the MERMAID coral reef monitoring API (https://api.datamermaid.org/v1/). This file is a generated, single-file snapshot of the repository for LLM and coding-agent consumption; edit the real sources, never this artifact. Start with README.md for usage and CLAUDE.md for build, test and architecture notes.",
+    "headerText": "datamermaid - a typed Python SDK for the MERMAID coral reef monitoring API (https://api.datamermaid.org/v1/) and the MERMAID Zonal Stats service (https://api.zonalstats.datamermaid.org/), a separate public host reached through client.zonal_stats and configured with MERMAID_ZONAL_STATS_URL. This file is a generated, single-file snapshot of the repository for LLM and coding-agent consumption; edit the real sources, never this artifact. Start with README.md for usage and CLAUDE.md for build, test and architecture notes.",
     "fileSummary": true,
     "directoryStructure": true,
     "files": true,

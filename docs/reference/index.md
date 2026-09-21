@@ -16,7 +16,7 @@ with MermaidClient() as client:
 | --- | --- |
 | [Client](client.md) | [`MermaidClient`][datamermaid.client.MermaidClient], the base URL constants and the transport helpers |
 | [Authentication](auth.md) | The [`Auth`][datamermaid.auth.base.Auth] seam, API keys, the OAuth grants, the token cache |
-| [Resources](resources.md) | One wrapper per endpoint group, including the project handle and the aggregated views |
+| [Resources](resources.md) | One wrapper per endpoint group, including the project handle, the aggregated views and the [zonal statistics](resources.md#zonal-statistics) endpoints |
 | [Models](models.md) | The frozen dataclasses records are parsed into |
 | [Pagination](pagination.md) | [`PaginatedList`][datamermaid.pagination.PaginatedList] and the DataFrame export |
 | [Batches](batch.md) | [`LazyBatch`][datamermaid.batch.LazyBatch], one request per area of interest on a thread pool |
