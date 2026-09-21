@@ -46,6 +46,7 @@ from .reference import (
     SitesResource,
     SummarySampleEventsResource,
 )
+from .zonal_stats import RasterStatsEndpoint, ZonalStatsEndpoint, ZonalStatsResource
 
 __all__ = [
     "AGGREGATED_FAMILIES",
@@ -84,8 +85,11 @@ __all__ = [
     "ProjectSitesResource",
     "ProjectTagsResource",
     "ProjectsResource",
+    "RasterStatsEndpoint",
     "ReadOnlyResource",
     "Resource",
     "SitesResource",
     "SummarySampleEventsResource",
+    "ZonalStatsEndpoint",
+    "ZonalStatsResource",
 ]

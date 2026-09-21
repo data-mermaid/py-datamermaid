@@ -99,15 +99,53 @@ def _decode_body(response: httpx.Response) -> Any:
         return response.text
 
 
+#: Longest error detail quoted in an exception message.
+DETAIL_LIMIT = 200
+
+
+def _validation_summary(errors: list[Any]) -> str | None:
+    """Join a FastAPI validation list into ``loc: msg; loc: msg``.
+
+    Pydantic reports request body problems as a list of ``{"loc": [...],
+    "msg": "...", "type": "..."}`` objects.  Each becomes ``body.aoi.radius:
+    Input should be a valid number``; anything that is not such an object is
+    quoted as-is so nothing is lost.
+    """
+
+    parts: list[str] = []
+    for error in errors:
+        if isinstance(error, dict):
+            loc = error.get("loc")
+            msg = error.get("msg")
+            where = ".".join(str(part) for part in loc) if isinstance(loc, (list, tuple)) else ""
+            text = msg if isinstance(msg, str) else ""
+            if where and text:
+                parts.append(f"{where}: {text}")
+            elif where or text:
+                parts.append(where or text)
+            else:
+                parts.append(str(error))
+        elif error is not None:
+            parts.append(str(error))
+    return "; ".join(parts) or None
+
+
 def _detail(body: Any) -> str | None:
     if isinstance(body, dict):
         for key in ("detail", "message", "error"):
             value = body.get(key)
             if isinstance(value, str) and value:
                 return value
+            if isinstance(value, list) and value:
+                summary = _validation_summary(value)
+                if summary:
+                    return summary[:DETAIL_LIMIT]
         return None
+    if isinstance(body, list) and body:
+        summary = _validation_summary(body)
+        return summary[:DETAIL_LIMIT] if summary else None
     if isinstance(body, str) and body.strip():
-        return body.strip()[:200]
+        return body.strip()[:DETAIL_LIMIT]
     return None
 
 

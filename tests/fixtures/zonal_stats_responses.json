@@ -1,0 +1,48 @@
+{
+  "raster": {
+    "band_1": {
+      "min": 2.0,
+      "max": 31.0,
+      "mean": 12.3,
+      "count": 40,
+      "aoi_area": 785398.16,
+      "data_area": 781250.0
+    }
+  },
+  "raster_two_bands": {
+    "band_1": {
+      "mean": 12.3,
+      "count": 40,
+      "aoi_area": 785398.16,
+      "data_area": 781250.0
+    },
+    "band_2": {
+      "mean": 0.42,
+      "count": 40,
+      "aoi_area": 785398.16,
+      "data_area": 781250.0
+    }
+  },
+  "validation_error": {
+    "detail": [
+      {
+        "type": "missing",
+        "loc": ["body", "aoi", "PointGeometry", "coordinates"],
+        "msg": "Field required",
+        "input": {"type": "Point"}
+      },
+      {
+        "type": "missing",
+        "loc": ["body", "url"],
+        "msg": "Field required",
+        "input": {"aoi": {"type": "Point"}}
+      }
+    ]
+  },
+  "raster_error": {
+    "detail": "Error opening raster file: HTTP response code: 404"
+  },
+  "gateway_throttled": {
+    "message": "Too Many Requests"
+  }
+}

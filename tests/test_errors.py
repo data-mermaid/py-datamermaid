@@ -124,3 +124,35 @@ def test_non_json_body_raises_a_clear_error(client):
     respx.get(f"{BASE_URL}me/").mock(return_value=httpx.Response(200, text="<html>nope</html>"))
     with pytest.raises(MermaidConnectionError, match="non-JSON"):
         client.me()
+
+
+def test_detail_summarises_a_validation_list():
+    from datamermaid.exceptions import _detail
+
+    errors = [
+        {"loc": ["body", "aoi", "PointGeometry", "coordinates"], "msg": "Field required"},
+        {"loc": ["body", "url"], "msg": "Field required", "type": "missing"},
+    ]
+    expected = "body.aoi.PointGeometry.coordinates: Field required; body.url: Field required"
+    assert _detail({"detail": errors}) == expected
+    assert _detail(errors) == expected
+
+
+def test_detail_copes_with_odd_validation_entries():
+    from datamermaid.exceptions import _detail
+
+    assert _detail({"detail": [{"msg": "broken"}]}) == "broken"
+    assert _detail({"detail": [{"loc": ["body"]}]}) == "body"
+    assert _detail({"detail": ["plain text", {"type": "x"}]}) == "plain text; {'type': 'x'}"
+    assert _detail({"detail": []}) is None
+    assert _detail([]) is None
+    assert _detail({"detail": [None]}) is None
+
+
+def test_detail_truncates_a_long_validation_list():
+    from datamermaid.exceptions import _detail
+
+    errors = [{"loc": ["body", f"field_{i}"], "msg": "x" * 50} for i in range(10)]
+    summary = _detail({"detail": errors})
+    assert summary is not None
+    assert len(summary) == 200
