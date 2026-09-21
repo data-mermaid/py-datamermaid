@@ -111,4 +111,5 @@ nav:
       - Models: reference/models.md
       - Pagination: reference/pagination.md
       - Batches: reference/batch.md
+      - Geometry: reference/geometry.md
       - Exceptions: reference/exceptions.md

@@ -17,6 +17,15 @@ result = client.zonal_stats.raster.stats(
 result["band_1"]["mean"]
 ```
 
+The area of interest goes through [`to_aoi`][datamermaid.geometry.to_aoi], so a
+[`Site`][datamermaid.models.Site], a shapely geometry or a ``(lon, lat)`` tuple
+work just as well as a GeoJSON mapping:
+
+```python
+site = client.projects(project_id).sites.get(site_id)
+result = client.zonal_stats.raster.stats(site, url="https://example.test/depth.tif", radius=500)
+```
+
 Many areas of interest go through ``batch``, which answers with a lazy
 [`LazyBatch`][datamermaid.batch.LazyBatch] that issues one request per AOI on a
 bounded thread pool and labels each result so ``to_df()`` gives one row per AOI:
@@ -37,6 +46,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypeVar, cast
 
 from ..batch import DEFAULT_MAX_WORKERS, LazyBatch
+from ..geometry import GeometryLike, to_aoi
 from ..models import Site, ZonalStatsResult
 from .base import BaseResource
 
@@ -45,59 +55,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = ["BatchItem", "RasterStatsEndpoint", "ZonalStatsEndpoint", "ZonalStatsResource"]
 
-#: The GeoJSON geometry types the service accepts as an area of interest.
-AOI_TYPES = frozenset({"Point", "Polygon"})
-
 #: An endpoint wrapper cached on the resource, for `ZonalStatsResource._endpoint`.
 E = TypeVar("E", bound="ZonalStatsEndpoint")
-
-
-def _geometry_of(aoi: Any) -> Any:
-    """Find the GeoJSON geometry inside whatever ``aoi`` is.
-
-    A [`Site`][datamermaid.models.Site] contributes its ``location``; anything
-    with a ``__geo_interface__`` (a shapely geometry, a GeoDataFrame row)
-    contributes that; a GeoJSON ``Feature`` contributes its ``geometry``.  A
-    plain geometry mapping passes through.
-    """
-
-    if isinstance(aoi, Site):
-        if aoi.location is None:
-            raise ValueError(f"site {aoi.id!r} has no location")
-        aoi = aoi.location
-    elif not isinstance(aoi, Mapping) and hasattr(aoi, "__geo_interface__"):
-        aoi = aoi.__geo_interface__
-    if isinstance(aoi, Mapping) and aoi.get("type") == "Feature":
-        aoi = aoi.get("geometry")
-    return aoi
-
-
-def _to_aoi(aoi: Any, radius: float | None = None) -> dict[str, Any]:
-    """Normalise ``aoi`` into the GeoJSON object the service expects.
-
-    ``aoi`` is a GeoJSON ``Point`` or ``Polygon`` mapping, a ``Feature`` holding
-    one, a [`Site`][datamermaid.models.Site] or an object with a
-    ``__geo_interface__``; ``radius`` (metres) is merged into a Point.  The
-    endpoints never look inside an AOI themselves.
-    """
-
-    aoi = _geometry_of(aoi)
-    if not isinstance(aoi, Mapping):
-        raise TypeError(f"aoi must be a GeoJSON mapping, got {type(aoi).__name__}")
-    geometry_type = aoi.get("type")
-    if geometry_type not in AOI_TYPES:
-        raise ValueError(f"aoi type must be one of {sorted(AOI_TYPES)}, got {geometry_type!r}")
-    if "coordinates" not in aoi:
-        raise ValueError("aoi is missing 'coordinates'")
-
-    geometry = dict(aoi)
-    if radius is not None:
-        if geometry_type != "Point":
-            raise ValueError("radius only applies to a Point aoi")
-        if radius < 0:
-            raise ValueError("radius must be >= 0")
-        geometry["radius"] = radius
-    return geometry
 
 
 def _bands(bands: Sequence[int] | None) -> list[int] | None:
@@ -195,7 +154,7 @@ class ZonalStatsEndpoint:
 
     def _body(
         self,
-        aoi: Any,
+        aoi: GeometryLike,
         *,
         url: str,
         stats: Sequence[str] | None,
@@ -204,7 +163,7 @@ class ZonalStatsEndpoint:
     ) -> dict[str, Any]:
         """Compose the request body, leaving out every option that is ``None``."""
 
-        body: dict[str, Any] = {"aoi": _to_aoi(aoi, radius), "url": _check_url(url)}
+        body: dict[str, Any] = {"aoi": to_aoi(aoi, radius=radius), "url": _check_url(url)}
         if stats is not None:
             if isinstance(stats, str):
                 raise TypeError("stats must be a sequence of statistic names")
@@ -222,7 +181,7 @@ class ZonalStatsEndpoint:
 
     def _request(
         self,
-        aoi: Any,
+        aoi: GeometryLike,
         *,
         label: Any,
         url: str,
@@ -268,7 +227,7 @@ class ZonalStatsEndpoint:
 
     def stats(
         self,
-        aoi: Any,
+        aoi: GeometryLike,
         *,
         url: str,
         stats: Sequence[str] | None = None,
@@ -279,9 +238,10 @@ class ZonalStatsEndpoint:
         """Compute statistics for ``aoi`` against the source at ``url``.
 
         Args:
-            aoi: A GeoJSON ``Point`` or ``Polygon`` mapping, a ``Feature`` holding
-                one, a [`Site`][datamermaid.models.Site], or any object with a
-                ``__geo_interface__``.
+            aoi: Anything [`to_aoi`][datamermaid.geometry.to_aoi] accepts: a
+                GeoJSON ``Point`` or ``Polygon`` mapping, a ``Feature`` holding
+                one, an object with a ``__geo_interface__``, a ``(lon, lat)``
+                tuple, or a [`Site`][datamermaid.models.Site].
             url: The data source the route reads, e.g. a Cloud Optimized GeoTIFF.
             stats: Statistic names (``mean``, ``count``, ``median``, ...).  When
                 omitted the service picks its defaults.
@@ -290,7 +250,8 @@ class ZonalStatsEndpoint:
             **options: Route-specific body fields; a ``None`` value is left out.
 
         Raises:
-            TypeError: If ``aoi`` is not a mapping.
+            TypeError: If ``aoi`` is none of the kinds
+                [`to_aoi`][datamermaid.geometry.to_aoi] accepts.
             ValueError: If ``aoi`` is not a Point or Polygon, or an option is
                 malformed.
             MermaidAPIError: If the service rejects the request (422 for a
@@ -350,7 +311,7 @@ class ZonalStatsEndpoint:
             **options,
         )
 
-    def __call__(self, aoi: Any, *, url: str, **kwargs: Any) -> ZonalStatsResult:
+    def __call__(self, aoi: GeometryLike, *, url: str, **kwargs: Any) -> ZonalStatsResult:
         """Same as [`stats`][..stats], so ``client.zonal_stats.raster(aoi, url=...)`` works."""
 
         return self.stats(aoi, url=url, **kwargs)
@@ -365,7 +326,7 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
     # one names the raster options instead, which mypy reads as a narrowing.
     def stats(  # type: ignore[override]
         self,
-        aoi: Any,
+        aoi: GeometryLike,
         *,
         url: str,
         stats: Sequence[str] | None = None,
@@ -377,9 +338,10 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
         """Compute statistics for ``aoi`` over the raster at ``url``.
 
         Args:
-            aoi: A GeoJSON ``Point`` or ``Polygon`` mapping, a ``Feature``, a
-                [`Site`][datamermaid.models.Site], or an object with a
-                ``__geo_interface__``.
+            aoi: Anything [`to_aoi`][datamermaid.geometry.to_aoi] accepts: a
+                GeoJSON ``Point`` or ``Polygon`` mapping, a ``Feature``, an object
+                with a ``__geo_interface__``, a ``(lon, lat)`` tuple, or a
+                [`Site`][datamermaid.models.Site].
             url: URL of the Cloud Optimized GeoTIFF (``https://`` or ``s3://``).
             stats: Statistic names.  Omitted, the service returns ``min``,
                 ``max``, ``mean`` and ``count``; ``aoi_area`` and ``data_area``

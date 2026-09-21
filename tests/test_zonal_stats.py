@@ -14,14 +14,15 @@ from datamermaid import (
     MermaidAPIError,
     MermaidClient,
     RateLimitError,
+    Site,
     ZonalStatsResult,
+    to_aoi,
 )
 from datamermaid.client import resolve_zonal_stats_url
 from datamermaid.pagination import to_dataframe
 from datamermaid.resources import RasterStatsEndpoint, ZonalStatsEndpoint, ZonalStatsResource
-from datamermaid.resources.zonal_stats import _to_aoi
 
-from .conftest import ZONAL_STATS_URL, load_fixture
+from .conftest import ZONAL_STATS_URL, load_fixture, project_scoped_payload
 
 RASTER_URL = f"{ZONAL_STATS_URL}raster"
 COG = "https://example.test/cogs/depth.tif"
@@ -208,6 +209,42 @@ def test_the_input_aoi_is_not_mutated(client):
     assert aoi == POINT
 
 
+@respx.mock
+def test_a_site_and_a_geo_interface_object_reach_the_wire_as_geojson(client):
+    """The AOI is normalised by ``to_aoi`` before it is sent."""
+
+    route = respx.post(RASTER_URL).mock(
+        return_value=httpx.Response(200, json=zonal_payload("raster"))
+    )
+    site = Site.from_api(project_scoped_payload("sites"))
+    assert site.location == {"type": "Point", "coordinates": [179.2251, -17.97855]}
+
+    client.zonal_stats.raster.stats(site, url=COG, radius=500)
+    assert body_of(route)["aoi"] == {
+        "type": "Point",
+        "coordinates": [179.2251, -17.97855],
+        "radius": 500,
+    }
+
+    class Shape:
+        @property
+        def __geo_interface__(self):
+            return {
+                "type": "Feature",
+                "properties": {"name": "reef"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [tuple(map(tuple, POLYGON["coordinates"][0]))],
+                },
+            }
+
+    client.zonal_stats.raster.stats(Shape(), url=COG)
+    assert body_of(route)["aoi"] == POLYGON
+
+    client.zonal_stats.raster.stats((178.4, -18.1), url=COG)
+    assert body_of(route)["aoi"] == POINT
+
+
 # -- argument validation ----------------------------------------------------
 
 
@@ -251,19 +288,19 @@ def test_bad_aoi_is_rejected(client, aoi, error):
 
 def test_radius_only_applies_to_a_point():
     with pytest.raises(ValueError, match="radius"):
-        _to_aoi(POLYGON, radius=100)
+        to_aoi(POLYGON, radius=100)
     with pytest.raises(ValueError, match="radius"):
-        _to_aoi(POINT, radius=-1)
+        to_aoi(POINT, radius=-1)
 
 
 def test_to_aoi_merges_radius_into_a_copy():
-    geometry = _to_aoi(POINT, radius=500)
+    geometry = to_aoi(POINT, radius=500)
     assert geometry == {"type": "Point", "coordinates": [178.4, -18.1], "radius": 500}
     assert "radius" not in POINT
-    assert _to_aoi(POINT) == POINT
-    assert _to_aoi(POLYGON) == POLYGON
+    assert to_aoi(POINT) == POINT
+    assert to_aoi(POLYGON) == POLYGON
     # A radius already on the geometry is kept when none is passed.
-    assert _to_aoi({**POINT, "radius": 10})["radius"] == 10
+    assert to_aoi({**POINT, "radius": 10})["radius"] == 10
 
 
 # -- the result -------------------------------------------------------------

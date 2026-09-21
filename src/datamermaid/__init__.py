@@ -61,6 +61,7 @@ from .exceptions import (
     RateLimitError,
     ServerError,
 )
+from .geometry import GeometryLike, HasGeoInterface, to_aoi
 from .models import (
     AggregatedRecord,
     APIModel,
@@ -138,7 +139,9 @@ __all__ = [
     "FishGenus",
     "FishSize",
     "FishSpecies",
+    "GeometryLike",
     "HabitatComplexityMethod",
+    "HasGeoInterface",
     "InvertAttribute",
     "InvertBeltTransect",
     "InvertSpecies",
@@ -175,4 +178,5 @@ __all__ = [
     "__version__",
     "login",
     "logout",
+    "to_aoi",
 ]
