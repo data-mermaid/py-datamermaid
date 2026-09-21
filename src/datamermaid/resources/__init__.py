@@ -46,12 +46,24 @@ from .reference import (
     SitesResource,
     SummarySampleEventsResource,
 )
-from .zonal_stats import BatchItem, RasterStatsEndpoint, ZonalStatsEndpoint, ZonalStatsResource
+from .zonal_stats import (
+    ZONAL_STATS_ENDPOINTS,
+    BatchItem,
+    RasterStacStatsEndpoint,
+    RasterStatsEndpoint,
+    Stat,
+    VectorStacStatsEndpoint,
+    VectorStatsEndpoint,
+    WeightingMethod,
+    ZonalStatsEndpoint,
+    ZonalStatsResource,
+)
 
 __all__ = [
     "AGGREGATED_FAMILIES",
     "PROJECT_RESOURCES",
     "REFERENCE_RESOURCES",
+    "ZONAL_STATS_ENDPOINTS",
     "AggregatedFamilyResource",
     "AggregatedViewFamily",
     "BaseResource",
@@ -86,11 +98,16 @@ __all__ = [
     "ProjectSitesResource",
     "ProjectTagsResource",
     "ProjectsResource",
+    "RasterStacStatsEndpoint",
     "RasterStatsEndpoint",
     "ReadOnlyResource",
     "Resource",
     "SitesResource",
+    "Stat",
     "SummarySampleEventsResource",
+    "VectorStacStatsEndpoint",
+    "VectorStatsEndpoint",
+    "WeightingMethod",
     "ZonalStatsEndpoint",
     "ZonalStatsResource",
 ]

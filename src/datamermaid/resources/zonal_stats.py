@@ -17,6 +17,32 @@ result = client.zonal_stats.raster.stats(
 result["band_1"]["mean"]
 ```
 
+There are four routes, one per kind of source, listed in
+[`ZONAL_STATS_ENDPOINTS`][datamermaid.resources.zonal_stats.ZONAL_STATS_ENDPOINTS]:
+
+| Property      | Route          | Source                                 | Keys          |
+| ------------- | -------------- | -------------------------------------- | ------------- |
+| `raster`      | `raster`       | a Cloud Optimized GeoTIFF              | `band_1`, ... |
+| `raster_stac` | `raster/stac`  | a STAC Item whose asset is a GeoTIFF   | `band_1`, ... |
+| `vector`      | `vector`       | a GeoParquet file                      | column names  |
+| `vector_stac` | `vector/stac`  | a STAC Item whose asset is GeoParquet  | column names  |
+
+```python
+result = client.zonal_stats.raster_stac.stats(
+    aoi, url="https://example.test/item.json", asset="visual", bands=[1, 2]
+)
+result = client.zonal_stats.vector.stats(
+    aoi, url="https://example.test/habitat.parquet", columns=["depth"], weighting_method="ratio"
+)
+result["depth"]["mean"]
+```
+
+The statistic names and the vector weighting methods are fixed vocabularies,
+[`Stat`][datamermaid.resources.zonal_stats.Stat] and
+[`WeightingMethod`][datamermaid.resources.zonal_stats.WeightingMethod].  Plain
+strings are accepted too; an unknown one raises ``ValueError`` before any request
+is made.
+
 The area of interest goes through [`to_aoi`][datamermaid.geometry.to_aoi], so a
 [`Site`][datamermaid.models.Site], a shapely geometry or a ``(lon, lat)`` tuple
 work just as well as a GeoJSON mapping:
@@ -43,6 +69,7 @@ backoff and error mapping are the client's own.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypeVar, cast
 
 from ..batch import DEFAULT_MAX_WORKERS, LazyBatch
@@ -53,10 +80,115 @@ from .base import BaseResource
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
 
-__all__ = ["BatchItem", "RasterStatsEndpoint", "ZonalStatsEndpoint", "ZonalStatsResource"]
+__all__ = [
+    "ZONAL_STATS_ENDPOINTS",
+    "BatchItem",
+    "RasterStacStatsEndpoint",
+    "RasterStatsEndpoint",
+    "Stat",
+    "VectorStacStatsEndpoint",
+    "VectorStatsEndpoint",
+    "WeightingMethod",
+    "ZonalStatsEndpoint",
+    "ZonalStatsResource",
+]
 
 #: An endpoint wrapper cached on the resource, for `ZonalStatsResource._endpoint`.
 E = TypeVar("E", bound="ZonalStatsEndpoint")
+
+
+class Stat(str, Enum):
+    """A statistic the service can compute: the ``StatType`` vocabulary.
+
+    Members compare equal to their wire value, so ``Stat.MEAN == "mean"``, and
+    ``stats=`` takes members and plain strings alike.
+    """
+
+    MIN = "min"
+    MAX = "max"
+    MEAN = "mean"
+    COUNT = "count"
+    SUM = "sum"
+    STD = "std"
+    MEDIAN = "median"
+    MAJORITY = "majority"
+    MINORITY = "minority"
+    UNIQUE = "unique"
+    RANGE = "range"
+    NODATA = "nodata"
+    AOI_AREA = "aoi_area"
+    DATA_AREA = "data_area"
+    FREQ_HIST = "freq_hist"
+    DENSITY = "density"
+
+
+class WeightingMethod(str, Enum):
+    """How the vector routes weight each feature that intersects the AOI."""
+
+    #: Weight by the intersection area.
+    AREA = "area"
+    #: Weight by the intersection area over the feature's own area.
+    RATIO = "ratio"
+
+
+def _valid_names(vocabulary: type[Enum]) -> str:
+    return ", ".join(sorted(member.value for member in vocabulary))
+
+
+def _stats(stats: Iterable[Stat | str] | None) -> list[str] | None:
+    """Coerce ``stats`` to wire values, rejecting a bare string and unknown names."""
+
+    if stats is None:
+        return None
+    if isinstance(stats, (str, bytes)):
+        raise TypeError("stats must be a sequence of statistic names")
+    names: list[str] = []
+    for stat in stats:
+        try:
+            names.append(Stat(stat).value)
+        except ValueError:
+            raise ValueError(
+                f"unknown statistic {stat!r}; valid names are: {_valid_names(Stat)}"
+            ) from None
+    return names
+
+
+def _weighting_method(method: WeightingMethod | str | None) -> str | None:
+    if method is None:
+        return None
+    try:
+        return WeightingMethod(method).value
+    except ValueError:
+        raise ValueError(
+            f"unknown weighting_method {method!r}; valid names are: {_valid_names(WeightingMethod)}"
+        ) from None
+
+
+def _columns(columns: Sequence[str]) -> list[str]:
+    if isinstance(columns, (str, bytes)) or not isinstance(columns, Sequence):
+        raise TypeError("columns must be a sequence of column names")
+    if not columns:
+        raise ValueError("columns must not be empty")
+    for column in columns:
+        if not isinstance(column, str) or not column:
+            raise TypeError(f"column names must be non-empty strings, got {column!r}")
+    return list(columns)
+
+
+def _asset(asset: str | None) -> str | None:
+    if asset is None:
+        return None
+    if not isinstance(asset, str) or not asset:
+        raise ValueError("asset must be a non-empty string")
+    return asset
+
+
+def _geometry_column(geometry_column: str | None) -> str | None:
+    if geometry_column is None:
+        return None
+    if not isinstance(geometry_column, str):
+        raise TypeError("geometry_column must be a string")
+    return geometry_column
 
 
 def _bands(bands: Sequence[int] | None) -> list[int] | None:
@@ -157,17 +289,16 @@ class ZonalStatsEndpoint:
         aoi: GeometryLike,
         *,
         url: str,
-        stats: Sequence[str] | None,
+        stats: Iterable[Stat | str] | None,
         radius: float | None,
         **options: Any,
     ) -> dict[str, Any]:
         """Compose the request body, leaving out every option that is ``None``."""
 
         body: dict[str, Any] = {"aoi": to_aoi(aoi, radius=radius), "url": _check_url(url)}
-        if stats is not None:
-            if isinstance(stats, str):
-                raise TypeError("stats must be a sequence of statistic names")
-            body["stats"] = [str(stat) for stat in stats]
+        names = _stats(stats)
+        if names is not None:
+            body["stats"] = names
         for key, value in options.items():
             if value is not None:
                 body[key] = value
@@ -185,7 +316,7 @@ class ZonalStatsEndpoint:
         *,
         label: Any,
         url: str,
-        stats: Sequence[str] | None,
+        stats: Iterable[Stat | str] | None,
         radius: float | None,
         **options: Any,
     ) -> ZonalStatsResult:
@@ -202,25 +333,26 @@ class ZonalStatsEndpoint:
         max_workers: int,
         errors: Literal["raise", "return"],
         url: str,
-        stats: Sequence[str] | None,
+        stats: Iterable[Stat | str] | None,
         radius: float | None,
         **options: Any,
     ) -> LazyBatch[BatchItem, ZonalStatsResult]:
         """Build the lazy batch behind ``batch``: expand the AOIs, fix the labels, defer the rest.
 
-        The URL and the labels are checked here, before anything runs; each AOI
-        is validated when its own request is composed, so a bad one fails at its
-        position without spoiling the others.
+        The URL, the statistic names and the labels are checked here, before
+        anything runs; each AOI is validated when its own request is composed,
+        so a bad one fails at its position without spoiling the others.
         """
 
         _check_url(url)
+        names = _stats(stats)
         expanded = _expand_aois(aois)
         resolved = _resolve_labels(expanded, labels)
         items = [BatchItem(aoi, label) for aoi, label in zip(expanded, resolved, strict=True)]
 
         def compute(item: BatchItem) -> ZonalStatsResult:
             return self._request(
-                item.aoi, label=item.label, url=url, stats=stats, radius=radius, **options
+                item.aoi, label=item.label, url=url, stats=names, radius=radius, **options
             )
 
         return LazyBatch(items, compute, max_workers=max_workers, errors=errors)
@@ -230,7 +362,7 @@ class ZonalStatsEndpoint:
         aoi: GeometryLike,
         *,
         url: str,
-        stats: Sequence[str] | None = None,
+        stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
         label: Any = None,
         **options: Any,
@@ -243,8 +375,9 @@ class ZonalStatsEndpoint:
                 one, an object with a ``__geo_interface__``, a ``(lon, lat)``
                 tuple, or a [`Site`][datamermaid.models.Site].
             url: The data source the route reads, e.g. a Cloud Optimized GeoTIFF.
-            stats: Statistic names (``mean``, ``count``, ``median``, ...).  When
-                omitted the service picks its defaults.
+            stats: [`Stat`][datamermaid.resources.zonal_stats.Stat] members or
+                their names (``mean``, ``count``, ``median``, ...).  When omitted
+                the service picks its defaults.
             radius: Buffer around a ``Point``, in metres.
             label: An identifier carried onto the result unchanged.
             **options: Route-specific body fields; a ``None`` value is left out.
@@ -252,8 +385,8 @@ class ZonalStatsEndpoint:
         Raises:
             TypeError: If ``aoi`` is none of the kinds
                 [`to_aoi`][datamermaid.geometry.to_aoi] accepts.
-            ValueError: If ``aoi`` is not a Point or Polygon, or an option is
-                malformed.
+            ValueError: If ``aoi`` is not a Point or Polygon, a statistic name
+                is unknown, or an option is malformed.
             MermaidAPIError: If the service rejects the request (422 for a
                 validation error, 400 for an unreadable source).
         """
@@ -268,7 +401,7 @@ class ZonalStatsEndpoint:
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
-        stats: Sequence[str] | None = None,
+        stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
         **options: Any,
     ) -> LazyBatch[BatchItem, ZonalStatsResult]:
@@ -329,7 +462,7 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
         aoi: GeometryLike,
         *,
         url: str,
-        stats: Sequence[str] | None = None,
+        stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
         bands: Sequence[int] | None = None,
         approx_stats: bool = False,
@@ -374,7 +507,7 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
-        stats: Sequence[str] | None = None,
+        stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
         bands: Sequence[int] | None = None,
         approx_stats: bool = False,
@@ -409,6 +542,296 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
         )
 
 
+class RasterStacStatsEndpoint(ZonalStatsEndpoint):
+    """``POST .../zonal-stats/raster/stac``: statistics from a raster asset of a STAC Item."""
+
+    route = "raster/stac"
+
+    def stats(  # type: ignore[override]
+        self,
+        aoi: GeometryLike,
+        *,
+        url: str,
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+        label: Any = None,
+    ) -> ZonalStatsResult:
+        """Compute statistics for ``aoi`` over a raster asset of the STAC Item at ``url``.
+
+        Args:
+            aoi: Anything [`to_aoi`][datamermaid.geometry.to_aoi] accepts.
+            url: URL of the STAC Item JSON.
+            stats: [`Stat`][datamermaid.resources.zonal_stats.Stat] members or
+                their names.  Omitted, the service picks its defaults.
+            radius: Buffer around a ``Point``, in metres.
+            asset: Key of the asset to read.  Omitted, the service reads the
+                Item's first asset.
+            bands: 1-based band indices to read.  Omitted, the service reads
+                band 1.
+            approx_stats: Read overviews for faster, approximate values.
+            label: An identifier carried onto the result unchanged.
+
+        Returns:
+            The statistics keyed by band, ``band_1`` for the first band.
+        """
+
+        return self._request(
+            aoi,
+            label=label,
+            url=url,
+            stats=stats,
+            radius=radius,
+            asset=_asset(asset),
+            bands=_bands(bands),
+            approx_stats=approx_stats,
+        )
+
+    def batch(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
+        """One STAC raster statistics request per area of interest, run lazily in parallel.
+
+        Takes the same options as [`stats`][..stats]; see
+        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
+        options are validated before any request is made.
+        """
+
+        return self._batch(
+            aois,
+            labels=labels,
+            max_workers=max_workers,
+            errors=errors,
+            url=url,
+            stats=stats,
+            radius=radius,
+            asset=_asset(asset),
+            bands=_bands(bands),
+            approx_stats=approx_stats,
+        )
+
+
+class VectorStatsEndpoint(ZonalStatsEndpoint):
+    """``POST .../zonal-stats/vector``: area-weighted statistics from a GeoParquet file.
+
+    ``columns`` names the numeric columns to summarise and is required; the
+    result is keyed by those names.
+    """
+
+    route = "vector"
+
+    def stats(  # type: ignore[override]
+        self,
+        aoi: GeometryLike,
+        *,
+        url: str,
+        columns: Sequence[str],
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+        label: Any = None,
+    ) -> ZonalStatsResult:
+        """Compute statistics for ``aoi`` over the GeoParquet file at ``url``.
+
+        Args:
+            aoi: Anything [`to_aoi`][datamermaid.geometry.to_aoi] accepts.
+            url: URL of the GeoParquet file.
+            columns: Numeric columns to summarise.  Required and non-empty.
+            stats: [`Stat`][datamermaid.resources.zonal_stats.Stat] members or
+                their names.  Omitted, the service picks its defaults.
+            radius: Buffer around a ``Point``, in metres.
+            geometry_column: Name of the geometry column.  Omitted, the service
+                finds it from the file's metadata.
+            weighting_method: How intersecting features are weighted, a
+                [`WeightingMethod`][datamermaid.resources.zonal_stats.WeightingMethod]
+                or its name.  Omitted, the service weights by ``area``.
+            approx_stats: Reserved by the service for a future optimisation.
+            label: An identifier carried onto the result unchanged.
+
+        Returns:
+            The statistics keyed by column name.
+
+        Raises:
+            ValueError: If ``columns`` is empty, or a statistic or weighting
+                method name is unknown.
+            TypeError: If ``columns`` is a bare string or holds non-strings.
+        """
+
+        return self._request(
+            aoi,
+            label=label,
+            url=url,
+            stats=stats,
+            radius=radius,
+            columns=_columns(columns),
+            geometry_column=_geometry_column(geometry_column),
+            weighting_method=_weighting_method(weighting_method),
+            approx_stats=approx_stats,
+        )
+
+    def batch(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
+        """One vector statistics request per area of interest, run lazily in parallel.
+
+        Takes the same options as [`stats`][..stats]; see
+        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
+        options are validated before any request is made.
+        """
+
+        return self._batch(
+            aois,
+            labels=labels,
+            max_workers=max_workers,
+            errors=errors,
+            url=url,
+            stats=stats,
+            radius=radius,
+            columns=_columns(columns),
+            geometry_column=_geometry_column(geometry_column),
+            weighting_method=_weighting_method(weighting_method),
+            approx_stats=approx_stats,
+        )
+
+
+class VectorStacStatsEndpoint(VectorStatsEndpoint):
+    """``POST .../zonal-stats/vector/stac``: statistics from a GeoParquet asset of a STAC Item.
+
+    The vector route's options plus ``asset``, the key of the GeoParquet asset
+    to read.
+    """
+
+    route = "vector/stac"
+
+    def stats(  # type: ignore[override]
+        self,
+        aoi: GeometryLike,
+        *,
+        url: str,
+        columns: Sequence[str],
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+        label: Any = None,
+    ) -> ZonalStatsResult:
+        """Compute statistics for ``aoi`` over a GeoParquet asset of the STAC Item at ``url``.
+
+        Args:
+            aoi: Anything [`to_aoi`][datamermaid.geometry.to_aoi] accepts.
+            url: URL of the STAC Item JSON.
+            columns: Numeric columns to summarise.  Required and non-empty.
+            stats: [`Stat`][datamermaid.resources.zonal_stats.Stat] members or
+                their names.  Omitted, the service picks its defaults.
+            radius: Buffer around a ``Point``, in metres.
+            asset: Key of the GeoParquet asset to read.  Omitted, the service
+                reads the Item's first asset.
+            geometry_column: Name of the geometry column.  Omitted, the service
+                uses ``geometry``.
+            weighting_method: How intersecting features are weighted, a
+                [`WeightingMethod`][datamermaid.resources.zonal_stats.WeightingMethod]
+                or its name.  Omitted, the service weights by ``area``.
+            approx_stats: Reserved by the service for a future optimisation.
+            label: An identifier carried onto the result unchanged.
+
+        Returns:
+            The statistics keyed by column name.
+        """
+
+        return self._request(
+            aoi,
+            label=label,
+            url=url,
+            stats=stats,
+            radius=radius,
+            asset=_asset(asset),
+            columns=_columns(columns),
+            geometry_column=_geometry_column(geometry_column),
+            weighting_method=_weighting_method(weighting_method),
+            approx_stats=approx_stats,
+        )
+
+    def batch(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
+        """One STAC vector statistics request per area of interest, run lazily in parallel.
+
+        Takes the same options as [`stats`][..stats]; see
+        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
+        options are validated before any request is made.
+        """
+
+        return self._batch(
+            aois,
+            labels=labels,
+            max_workers=max_workers,
+            errors=errors,
+            url=url,
+            stats=stats,
+            radius=radius,
+            asset=_asset(asset),
+            columns=_columns(columns),
+            geometry_column=_geometry_column(geometry_column),
+            weighting_method=_weighting_method(weighting_method),
+            approx_stats=approx_stats,
+        )
+
+
+#: Every route of the service, as ``(property name, endpoint class)``, in the
+#: order they appear on [`ZonalStatsResource`][.ZonalStatsResource].
+ZONAL_STATS_ENDPOINTS: tuple[tuple[str, type[ZonalStatsEndpoint]], ...] = (
+    ("raster", RasterStatsEndpoint),
+    ("raster_stac", RasterStacStatsEndpoint),
+    ("vector", VectorStatsEndpoint),
+    ("vector_stac", VectorStacStatsEndpoint),
+)
+
+
 class ZonalStatsResource(BaseResource):
     """The Zonal Stats service, as ``client.zonal_stats``.
 
@@ -433,3 +856,21 @@ class ZonalStatsResource(BaseResource):
         """Statistics from a Cloud Optimized GeoTIFF, ``POST .../raster``."""
 
         return self._endpoint(RasterStatsEndpoint)
+
+    @property
+    def raster_stac(self) -> RasterStacStatsEndpoint:
+        """Statistics from a raster asset of a STAC Item, ``POST .../raster/stac``."""
+
+        return self._endpoint(RasterStacStatsEndpoint)
+
+    @property
+    def vector(self) -> VectorStatsEndpoint:
+        """Statistics from a GeoParquet file, ``POST .../vector``."""
+
+        return self._endpoint(VectorStatsEndpoint)
+
+    @property
+    def vector_stac(self) -> VectorStacStatsEndpoint:
+        """Statistics from a GeoParquet asset of a STAC Item, ``POST .../vector/stac``."""
+
+        return self._endpoint(VectorStacStatsEndpoint)

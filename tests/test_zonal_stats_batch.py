@@ -9,13 +9,15 @@ import httpx
 import pytest
 import respx
 
-from datamermaid import LazyBatch, MermaidAPIError, MermaidClient, Site
+from datamermaid import LazyBatch, MermaidAPIError, MermaidClient, Site, Stat, WeightingMethod
 from datamermaid.resources.zonal_stats import BatchItem, _expand_aois, _resolve_labels
 
 from .conftest import ZONAL_STATS_URL, load_fixture
 
 RASTER_URL = f"{ZONAL_STATS_URL}raster"
+VECTOR_STAC_URL = f"{ZONAL_STATS_URL}vector/stac"
 COG = "https://example.test/cogs/depth.tif"
+STAC_ITEM = "https://example.test/stac/items/habitat.json"
 POINTS = [{"type": "Point", "coordinates": [178.0 + index / 10, -18.1]} for index in range(3)]
 POLYGON = {
     "type": "Polygon",
@@ -117,6 +119,58 @@ def test_batch_sends_every_raster_option(client):
             "approx_stats": True,
         }
     ]
+
+
+@respx.mock
+def test_batch_sends_every_vector_stac_option(client):
+    """The other routes share the machinery; the vector STAC one has the most options."""
+
+    route = respx.post(VECTOR_STAC_URL).mock(
+        return_value=httpx.Response(200, json=zonal_payload("vector"))
+    )
+
+    batch = client.zonal_stats.vector_stac.batch(
+        POINTS,
+        url=STAC_ITEM,
+        asset="data",
+        columns=["depth"],
+        stats=[Stat.MEAN],
+        weighting_method=WeightingMethod.RATIO,
+        radius=250,
+    )
+    results = batch.results()
+
+    assert route.call_count == len(POINTS)
+    assert bodies(route) == [
+        {
+            "aoi": {**point, "radius": 250},
+            "url": STAC_ITEM,
+            "stats": ["mean"],
+            "asset": "data",
+            "columns": ["depth"],
+            "weighting_method": "ratio",
+            "approx_stats": False,
+        }
+        for point in POINTS
+    ]
+    assert [result["depth"]["mean"] for result in results] == [11.2, 11.2, 11.2]
+
+
+def test_vector_batch_rejects_bad_options_before_any_request(client):
+    with respx.mock:
+        with pytest.raises(ValueError, match="columns"):
+            client.zonal_stats.vector.batch(POINTS, url=STAC_ITEM, columns=[])
+        with pytest.raises(ValueError, match="weighting_method"):
+            client.zonal_stats.vector.batch(
+                POINTS, url=STAC_ITEM, columns=["depth"], weighting_method="foo"
+            )
+        with pytest.raises(ValueError, match="average"):
+            client.zonal_stats.vector_stac.batch(
+                POINTS, url=STAC_ITEM, columns=["depth"], stats=["average"]
+            )
+        with pytest.raises(ValueError, match="average"):
+            client.zonal_stats.raster.batch(POINTS, url=COG, stats=["average"])
+        assert respx.calls.call_count == 0
 
 
 @respx.mock
