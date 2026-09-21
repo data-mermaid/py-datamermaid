@@ -15,6 +15,7 @@ Python SDK for the [MERMAID](https://datamermaid.org/) coral reef monitoring API
 - Lazy pagination: pages are fetched only as you consume them
 - One-line export to a pandas DataFrame
 - Pluggable authentication: API key, or an OAuth login that also works over SSH
+- Zonal statistics for a site or a polygon, batched over a whole project in parallel
 - Automatic retries on rate limits and server errors
 
 ## Install
@@ -250,6 +251,53 @@ choices.keys()  # 'countries', 'reeftypes', 'managementparties', ...
 client.choices("reeftypes")  # just one set, from /choices/reeftypes/
 ```
 
+### Zonal statistics
+
+`client.zonal_stats` computes raster and vector statistics for a place: the mean
+depth within 500 m of a site, the habitat classes a survey polygon covers. They
+come from the MERMAID Zonal Stats service, a separate public host that takes no
+credentials, and you bring the data source as a URL. There are four endpoints,
+`raster` and `vector` for a Cloud Optimized GeoTIFF or a GeoParquet file, and
+`raster_stac` and `vector_stac` for an asset of a STAC Item:
+
+```python
+from datamermaid import MermaidClient
+
+with MermaidClient() as client:  # the service is public, no credentials needed
+    result = client.zonal_stats.raster.stats(
+        {"type": "Point", "coordinates": [178.4, -18.1]},
+        url="https://example.test/depth.tif",
+        stats=["mean", "count"],
+        radius=500,
+    )
+    print(result["band_1"]["mean"])
+```
+
+The area of interest can be a GeoJSON mapping, anything with a
+`__geo_interface__` (a shapely geometry, a GeoDataFrame row), a `(lon, lat)`
+tuple or a `Site`, and `to_aoi` is exported if you want to normalise one
+yourself. `batch()` runs one request per area on a thread pool, lazily, so a
+whole project becomes one table:
+
+```python
+with MermaidClient() as client:
+    project = client.projects("d5491b25-4a5f-401b-a50f-bb80fd1df78f")
+    batch = client.zonal_stats.raster.batch(
+        project.sites.list(),
+        url="https://example.test/depth.tif",
+        stats=["mean"],
+        radius=500,
+        max_workers=4,
+    )
+    depth = batch.to_df()  # one wide row per site: label, source, band_1_mean, ...
+```
+
+Nothing is requested until the batch is iterated, indexed or exported, the
+workers share the client's rate-limit backoff, and `errors="return"` keeps a
+partly failing batch usable. See the
+[zonal statistics guide](https://data-mermaid.github.io/py-datamermaid/zonal_stats/)
+for the STAC routes, the weighting methods and the long-form export.
+
 ### Pagination
 
 `client.projects.list()` returns a `PaginatedList`. It issues no request until
@@ -284,11 +332,13 @@ collections.
 | --- | --- | --- |
 | `api_key` | `MERMAID_API_KEY` | none (anonymous) |
 | `base_url` | `MERMAID_API_URL` | `https://api.datamermaid.org/v1/` |
+| `zonal_stats_url` | `MERMAID_ZONAL_STATS_URL` | `https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/` |
 | `timeout` | | `30.0` seconds |
 | `max_retries` | | `3` (429 and 5xx, with exponential backoff honouring `Retry-After`) |
 
 The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
-`datamermaid.DEV_BASE_URL`.
+`datamermaid.DEV_BASE_URL`. The Zonal Stats service is a separate public
+host, so it has its own setting and is sent no credentials.
 
 ### Errors
 
@@ -424,8 +474,9 @@ matters for the `device` flow, which has no redirect at all.
 ## Examples
 
 [`examples/`](examples/README.md) holds runnable versions of everything above:
-four scripts (API key quickstart, OAuth login, reference data, project data)
-and two [marimo](https://marimo.io) notebooks that serve themselves. Each file
+five scripts (API key quickstart, OAuth login, reference data, project data,
+zonal statistics) and two [marimo](https://marimo.io) notebooks that serve
+themselves. Each file
 carries PEP 723 inline metadata, so no setup is needed beyond `uv`:
 
 ```bash

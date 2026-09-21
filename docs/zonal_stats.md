@@ -201,7 +201,7 @@ batch = client.zonal_stats.raster.batch(
     radius=500,
     max_workers=4,
 )
-len(batch)      # the number of sites, with no request sent yet
+len(batch)  # the number of sites, with no request sent yet
 batch[0].label  # one request: the first site's id
 ```
 

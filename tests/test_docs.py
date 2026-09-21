@@ -267,10 +267,11 @@ def _call_result(target: Any, name: str) -> Any:
             return target.model()
     if isinstance(target, MermaidClient) and name == "me":
         return Me()
-    if isinstance(target, ZonalStatsResource):
-        # `client.zonal_stats.raster(aoi, url=...)` is the endpoint's `__call__`.
-        if isinstance(getattr(target, name, None), ZonalStatsEndpoint):
-            return _item(ZonalStatsResult)
+    # `client.zonal_stats.raster(aoi, url=...)` is the endpoint's `__call__`.
+    if isinstance(target, ZonalStatsResource) and isinstance(
+        getattr(target, name, None), ZonalStatsEndpoint
+    ):
+        return _item(ZonalStatsResult)
     if isinstance(target, ZonalStatsEndpoint):
         if name == "stats":
             return _item(ZonalStatsResult)
