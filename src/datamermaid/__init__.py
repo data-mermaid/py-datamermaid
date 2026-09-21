@@ -41,6 +41,7 @@ from .auth import (
     login,
     logout,
 )
+from .batch import LazyBatch
 from .client import (
     BASE_URL_ENV_VAR,
     DEFAULT_BASE_URL,
@@ -142,6 +143,7 @@ __all__ = [
     "InvertBeltTransect",
     "InvertSpecies",
     "LabelMapping",
+    "LazyBatch",
     "Management",
     "Me",
     "MermaidAPIError",

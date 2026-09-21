@@ -19,6 +19,7 @@ with MermaidClient() as client:
 | [Resources](resources.md) | One wrapper per endpoint group, including the project handle and the aggregated views |
 | [Models](models.md) | The frozen dataclasses records are parsed into |
 | [Pagination](pagination.md) | [`PaginatedList`][datamermaid.pagination.PaginatedList] and the DataFrame export |
+| [Batches](batch.md) | [`LazyBatch`][datamermaid.batch.LazyBatch], one request per area of interest on a thread pool |
 | [Exceptions](exceptions.md) | The [`MermaidError`][datamermaid.exceptions.MermaidError] hierarchy |
 
 ## Package
