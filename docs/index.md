@@ -13,6 +13,7 @@ typed wrapper over it.
 - Lazy pagination: pages are fetched only as you consume them
 - One-line export to a `pandas` DataFrame
 - Pluggable authentication: an API key, or an OAuth login that also works over SSH
+- Zonal statistics for a site or a polygon, batched over a project in parallel
 - Automatic retries on rate limits and server errors
 
 ## Install
@@ -102,6 +103,11 @@ with MermaidClient() as client:
     Project-scoped collections, the aggregated observation views, and a worked
     biomass analysis ending in a `pandas` groupby.
 
+- **[Zonal statistics](zonal_stats.md)**
+
+    Raster and vector statistics for a site, a polygon or a whole project's
+    sites, from the public Zonal Stats service.
+
 - **[Examples](examples.md)**
 
     Runnable scripts and two marimo notebooks, each self-installing via `uv run`.
@@ -118,11 +124,14 @@ with MermaidClient() as client:
 | --- | --- | --- |
 | `api_key` | `MERMAID_API_KEY` | none (anonymous) |
 | `base_url` | `MERMAID_API_URL` | `https://api.datamermaid.org/v1/` |
+| `zonal_stats_url` | `MERMAID_ZONAL_STATS_URL` | `https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/` |
 | `timeout` | | `30.0` seconds |
 | `max_retries` | | `3` (429 and 5xx, exponential backoff honouring `Retry-After`) |
 
 The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
-[`datamermaid.DEV_BASE_URL`][datamermaid.client.DEV_BASE_URL].
+[`datamermaid.DEV_BASE_URL`][datamermaid.client.DEV_BASE_URL]. The
+[Zonal Stats service](zonal_stats.md) is a separate public host, so it has its
+own setting and receives no credentials.
 
 ## License
 
