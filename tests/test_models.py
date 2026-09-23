@@ -44,6 +44,28 @@ def test_unparseable_values_are_preserved_in_extra():
     assert project.extra["created_on"] == "not a date"
 
 
+def test_a_failed_date_conversion_is_exported_raw():
+    me = Me.from_api({"id": "abc", "created_on": "not-a-date"})
+    assert me.created_on is None
+    assert me.to_dict()["created_on"] == "not-a-date"
+    assert me.to_dict(include_extra=False)["created_on"] is None
+
+
+def test_a_failed_collection_conversion_is_exported_raw():
+    project = Project.from_api(project_payload(countries="Fiji", tags=7))
+    assert project.countries == ()
+    exported = project.to_dict()
+    assert exported["countries"] == "Fiji"
+    assert exported["tags"] == 7
+    assert list(exported).count("countries") == 1
+
+
+def test_a_failed_nested_conversion_is_exported_raw():
+    me = Me.from_api({"id": "abc", "projects": "oops"})
+    assert me.projects == ()
+    assert me.to_dict()["projects"] == "oops"
+
+
 def test_null_collections_become_empty_tuples():
     project = Project.from_api(project_payload(created_on=None, countries=None))
     assert project.created_on is None

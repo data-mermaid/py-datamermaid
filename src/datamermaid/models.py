@@ -201,16 +201,27 @@ class APIModel:
         return cls(extra=payload, **kwargs)
 
     def to_dict(self, *, include_extra: bool = True) -> dict[str, Any]:
-        """Flatten the model into a plain dict, suitable for a DataFrame row."""
+        """Flatten the model into a plain dict, suitable for a DataFrame row.
+
+        With ``include_extra``, a field whose value failed conversion exports
+        the raw value [`from_api`][.from_api] kept in ``extra``, not the
+        field's default, so the export loses nothing the model holds.
+        """
 
         data: dict[str, Any] = {}
+        extra = dict(self.extra) if include_extra else {}
         for model_field in fields(self):
             if model_field.name == "extra":
                 continue
-            data[model_field.name] = getattr(self, model_field.name)
-        if include_extra:
-            for key, value in self.extra.items():
-                data.setdefault(key, value)
+            key = model_field.metadata.get(API_FIELD, model_field.name)
+            if key in extra:
+                # `from_api` only leaves a declared key in `extra` when its
+                # conversion failed, so the raw value is the one to keep.
+                data[model_field.name] = extra.pop(key)
+            else:
+                data[model_field.name] = getattr(self, model_field.name)
+        for key, value in extra.items():
+            data.setdefault(key, value)
         return data
 
 
