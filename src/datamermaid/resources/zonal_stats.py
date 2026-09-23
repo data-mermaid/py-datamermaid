@@ -73,6 +73,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypeVar, cast
 
 from ..batch import DEFAULT_MAX_WORKERS, LazyBatch
+from ..exceptions import MermaidConnectionError
 from ..geometry import GeometryLike, to_aoi
 from ..models import Site, ZonalStatsResult
 from .base import BaseResource
@@ -308,7 +309,14 @@ class ZonalStatsEndpoint:
         # `auth=None` switches the client's credentials off for this request:
         # the service is public and lives on another host.
         data = self._client.request_json("POST", self.url, json=body, auth=None)
-        return ZonalStatsResult.from_api(data, aoi=body["aoi"], source=body["url"], label=label)
+        try:
+            return ZonalStatsResult.from_api(data, aoi=body["aoi"], source=body["url"], label=label)
+        except TypeError as exc:
+            # An empty body or the wrong JSON shape is as unusable as a
+            # non-JSON body, which `request_json` already reports this way.
+            raise MermaidConnectionError(
+                f"POST {self.url} returned a body that is not a zonal stats response: {exc}"
+            ) from exc
 
     def _request(
         self,

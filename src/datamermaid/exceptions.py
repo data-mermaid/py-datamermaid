@@ -33,7 +33,11 @@ class MermaidError(Exception):
 
 
 class MermaidConnectionError(MermaidError):
-    """The request never produced a response (DNS, TLS, timeout, reset)."""
+    """The request produced no usable response.
+
+    Either no response came back (DNS, TLS, timeout, reset), or the body could
+    not be used: it was not JSON, or not the shape the endpoint answers with.
+    """
 
 
 class AuthFlowError(MermaidError):

@@ -14,6 +14,7 @@ from datamermaid import (
     ZONAL_STATS_URL_ENV_VAR,
     MermaidAPIError,
     MermaidClient,
+    MermaidConnectionError,
     RateLimitError,
     Site,
     Stat,
@@ -856,6 +857,24 @@ def test_a_422_summarises_the_validation_errors(client):
     assert "; " in str(error)
     assert error.body == payload
     assert isinstance(error.body["detail"], list)
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("response", "match"),
+    [
+        (httpx.Response(200), "not a zonal stats response"),
+        (httpx.Response(200, json=[1, 2]), "not a zonal stats response"),
+        (httpx.Response(200, json={"band_1": 12.3}), "not a zonal stats response"),
+        (httpx.Response(200, text="<html>"), "non-JSON body"),
+    ],
+    ids=["empty", "list", "flat-object", "html"],
+)
+def test_an_unusable_200_body_is_a_connection_error(client, response, match):
+    respx.post(RASTER_URL).mock(return_value=response)
+
+    with pytest.raises(MermaidConnectionError, match=match):
+        client.zonal_stats.raster.stats(POINT, url=COG)
 
 
 @respx.mock

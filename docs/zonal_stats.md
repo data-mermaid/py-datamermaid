@@ -301,10 +301,19 @@ The Zonal Stats service raises the same exceptions as the rest of the SDK, from
 
 | What happened | Exception |
 | --- | --- |
-| the area of interest is not a Point or Polygon, or an option is malformed | `ValueError` or `TypeError`, raised locally, with no request sent |
+| the area of interest is not a Point or Polygon, or an option is malformed | `ValueError` or `TypeError`, raised locally, with no request sent (see below for batches) |
 | the service rejected the body (422) or could not read the source (400) | [`MermaidAPIError`][datamermaid.exceptions.MermaidAPIError] |
 | the service is rate limiting you | [`RateLimitError`][datamermaid.exceptions.RateLimitError], after the retries are spent |
-| the host is unreachable | [`MermaidConnectionError`][datamermaid.exceptions.MermaidConnectionError] |
+| the host is unreachable, or it answered with an empty body, a non-JSON body or JSON that is not a zonal stats response | [`MermaidConnectionError`][datamermaid.exceptions.MermaidConnectionError] |
+
+So `except MermaidError` around `stats()` catches every failure from the
+service. The local `ValueError` and `TypeError` are not `MermaidError`s.
+
+In a batch, the options are still checked at the `batch(...)` call. A bad area
+of interest is not: it fails at its own position, like a failed request. With
+`errors="raise"` its `ValueError` or `TypeError` is raised when you reach that
+position. With `errors="return"` it is returned in place of the result, and
+nothing is raised.
 
 ## Configuration
 
