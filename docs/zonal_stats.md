@@ -149,7 +149,8 @@ WeightingMethod.RATIO == "ratio"
 ```
 
 The service finds the geometry column in the file's metadata. Pass
-`geometry_column` to name a different one.
+`geometry_column` to name a different one. The STAC route below does not do
+this.
 
 ## STAC items
 
@@ -175,9 +176,12 @@ result = client.zonal_stats.vector_stac.stats(
 )
 ```
 
-Otherwise they behave exactly like the raster and vector endpoints above:
+Otherwise they behave like the raster and vector endpoints above:
 `raster_stac` takes `bands` and `approx_stats`, `vector_stac` takes `columns`,
-`geometry_column` and `weighting_method`.
+`geometry_column` and `weighting_method`. One default differs: `vector_stac`
+does not read the geometry column from the file's metadata. Without
+`geometry_column` it uses the column named `geometry`, so pass
+`geometry_column` when the asset names it differently.
 
 | Endpoint | Route | Source | Answer keyed by |
 | --- | --- | --- | --- |
