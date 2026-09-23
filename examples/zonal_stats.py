@@ -59,6 +59,20 @@ or log in through the browser once:
 """
 
 
+def positive_int(text: str) -> int:
+    """An argparse type for a whole number of at least 1."""
+
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if value < 1:
+        # A negative slice stop would make `sites.list()[:limit]` fetch every
+        # page, the opposite of a cap, and 0 would measure nothing.
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -86,13 +100,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--max-workers",
-        type=int,
+        type=positive_int,
         default=DEFAULT_MAX_WORKERS,
         help=f"requests in flight at once (default: {DEFAULT_MAX_WORKERS})",
     )
     parser.add_argument(
         "--limit",
-        type=int,
+        type=positive_int,
         default=DEFAULT_LIMIT,
         help=f"how many sites to cover (default: {DEFAULT_LIMIT})",
     )
