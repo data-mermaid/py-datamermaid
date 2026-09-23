@@ -63,6 +63,9 @@ class LazyBatch(Generic[I, T]):
             prefetch window when iterating.
         errors: ``"raise"`` re-raises a failed item's exception at its position;
             ``"return"`` yields the exception object instead.
+        label: Called with an input to get the ``label`` of its row when its
+            computation failed, so ``to_df()`` can tell failed rows apart.
+            Omitted, a failed row has only its ``error``.
 
     Raises:
         ValueError: If ``max_workers`` is below ``1`` or ``errors`` is unknown.
@@ -85,6 +88,7 @@ class LazyBatch(Generic[I, T]):
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
+        label: Callable[[I], Any] | None = None,
     ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1")
@@ -94,6 +98,7 @@ class LazyBatch(Generic[I, T]):
         self._compute = compute
         self._max_workers = max_workers
         self._errors = errors
+        self._label = label
         self._lock = threading.Lock()
         # Index -> result, or the Exception the computation raised.
         self._results: dict[int, Any] = {}
@@ -241,9 +246,18 @@ class LazyBatch(Generic[I, T]):
         [`ZonalStatsResult`][datamermaid.models.ZonalStatsResult], one wide row
         keyed by its ``label``).  Rows are in input order, so row ``i`` belongs
         to ``inputs[i]``.  With ``errors="return"`` a failed item is a row whose
-        ``error`` column holds the exception and whose other columns are empty.
+        ``error`` column holds the exception and whose other columns are empty,
+        except ``label`` when the batch was given a ``label`` function.
         Requires the optional ``pandas`` extra.
         """
 
-        rows = [{"error": item} if isinstance(item, Exception) else item for item in self.results()]
+        rows = [
+            self._error_row(index, item) if isinstance(item, Exception) else item
+            for index, item in enumerate(self.results())
+        ]
         return to_dataframe(rows, **kwargs)
+
+    def _error_row(self, index: int, error: Exception) -> dict[str, Any]:
+        if self._label is None:
+            return {"error": error}
+        return {"label": self._label(self._inputs[index]), "error": error}

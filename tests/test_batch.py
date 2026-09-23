@@ -391,6 +391,19 @@ def test_to_df_follows_the_error_mode():
     assert frame["error"].isna().tolist() == [True, False, True]
 
 
+def test_to_df_labels_failed_rows_when_given_a_label_function():
+    pytest.importorskip("pandas")
+
+    def failing(value):
+        if value == 1:
+            raise ValueError("boom")
+        return Row(value)
+
+    frame = LazyBatch(range(3), failing, errors="return", label=lambda value: value).to_df()
+    assert frame["label"].tolist() == [0, 1, 2]
+    assert isinstance(frame.loc[1, "error"], ValueError)
+
+
 def test_to_df_reports_pandas_missing():
     try:
         import pandas  # noqa: F401

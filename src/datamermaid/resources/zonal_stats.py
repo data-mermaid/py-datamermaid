@@ -355,7 +355,13 @@ class ZonalStatsEndpoint:
                 item.aoi, label=item.label, url=url, stats=names, radius=radius, **options
             )
 
-        return LazyBatch(items, compute, max_workers=max_workers, errors=errors)
+        return LazyBatch(
+            items,
+            compute,
+            max_workers=max_workers,
+            errors=errors,
+            label=lambda item: item.label,
+        )
 
     def stats(
         self,

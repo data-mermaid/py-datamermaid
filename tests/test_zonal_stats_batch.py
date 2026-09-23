@@ -266,6 +266,21 @@ def test_to_df_is_one_wide_row_per_aoi(client):
     assert frame["band_1_mean"].tolist() == [12.3, 12.3, 12.3]
 
 
+@respx.mock
+def test_to_df_keeps_the_label_of_a_failed_aoi(client):
+    pytest.importorskip("pandas")
+    respx.post(RASTER_URL).mock(return_value=ok())
+    aois = [POINTS[0], {"type": "LineString", "coordinates": [[0, 0], [1, 1]]}, POINTS[2]]
+
+    frame = client.zonal_stats.raster.batch(
+        aois, url=COG, labels=["a", "b", "c"], errors="return"
+    ).to_df()
+
+    assert frame["label"].tolist() == ["a", "b", "c"]
+    assert isinstance(frame.loc[1, "error"], ValueError)
+    assert frame["error"].isna().tolist() == [True, False, True]
+
+
 # -- labels -----------------------------------------------------------------
 
 

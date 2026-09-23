@@ -263,8 +263,9 @@ for item in batch:
         print(item.label, item["band_1"]["mean"])
 ```
 
-`to_df()` in that mode gives a row whose `error` column holds the exception and
-whose other columns are empty, so a partly failing batch still produces a table.
+`to_df()` in that mode gives a row whose `error` column holds the exception.
+The row keeps its `label`, so you can see which area failed, and its other
+columns are empty. A partly failing batch still produces a table.
 
 `batch.fetched` shows what has run so far, keyed by position, without running
 anything more. A failed item appears as its exception whichever error mode you
