@@ -204,7 +204,7 @@ class APIModel:
         """Flatten the model into a plain dict, suitable for a DataFrame row.
 
         With ``include_extra``, a field whose value failed conversion exports
-        the raw value [`from_api`][.from_api] kept in ``extra``, not the
+        the raw value ``from_api`` kept in ``extra``, not the
         field's default, so the export loses nothing the model holds.
         """
 
