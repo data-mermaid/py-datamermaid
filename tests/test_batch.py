@@ -283,6 +283,71 @@ def test_results_with_max_workers_larger_than_the_batch():
     assert batch.results() == [0, 10]
 
 
+def test_concurrent_reads_of_one_item_compute_it_once():
+    started = threading.Event()
+    release = threading.Event()
+    spy = Spy()
+
+    def compute(value):
+        started.set()
+        assert release.wait(TIMEOUT)
+        return spy(value)
+
+    batch = LazyBatch(range(3), compute)
+    seen = []
+    readers = [threading.Thread(target=lambda: seen.append(batch[0])) for _ in range(4)]
+    readers[0].start()
+    assert started.wait(TIMEOUT)
+    for reader in readers[1:]:
+        reader.start()
+    # The later readers are now waiting on the first one's computation.
+    release.set()
+    for reader in readers:
+        reader.join(TIMEOUT)
+
+    assert seen == [0, 0, 0, 0]
+    assert spy.calls == [0]
+
+
+def test_reading_an_item_a_closed_iterator_left_running_waits_for_it():
+    started = threading.Event()
+    release = threading.Event()
+    spy = Spy()
+
+    def compute(value):
+        if value == 1:
+            started.set()
+            assert release.wait(TIMEOUT)
+        return spy(value)
+
+    batch = LazyBatch(range(3), compute, max_workers=2)
+    iterator = iter(batch)
+    assert next(iterator) == 0
+    assert started.wait(TIMEOUT)
+    iterator.close()  # item 1 is still running on the abandoned pool
+
+    threading.Timer(0.05, release.set).start()
+    assert batch[1] == 10
+    assert spy.calls.count(1) == 1
+
+
+def test_an_interrupted_computation_is_retried_by_the_next_reader():
+    attempts = []
+
+    def compute(value):
+        attempts.append(value)
+        if len(attempts) == 1:
+            raise KeyboardInterrupt
+        return value * 10
+
+    batch = LazyBatch(range(1), compute)
+    with pytest.raises(KeyboardInterrupt):
+        batch[0]
+    assert batch.fetched == {}
+    assert batch[0] == 0
+    assert attempts == [0, 0]
+
+
 # -- errors -----------------------------------------------------------------
 
 

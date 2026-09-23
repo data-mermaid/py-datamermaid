@@ -102,21 +102,42 @@ class LazyBatch(Generic[I, T]):
         self._lock = threading.Lock()
         # Index -> result, or the Exception the computation raised.
         self._results: dict[int, Any] = {}
+        # Index -> an event set when the computation running for it finishes,
+        # so a second reader waits for that one instead of starting another.
+        self._inflight: dict[int, threading.Event] = {}
 
     # -- computing ----------------------------------------------------------
 
     def _run(self, index: int) -> None:
-        """Compute item ``index`` and cache it, unless another thread already has."""
+        """Compute item ``index`` and cache it, unless it is cached or already running.
 
-        with self._lock:
-            if index in self._results:
-                return
+        A caller that finds the item running waits for that computation, so an
+        item is computed once however many threads ask for it at the same time.
+        """
+
+        while True:
+            with self._lock:
+                if index in self._results:
+                    return
+                running = self._inflight.get(index)
+                if running is None:
+                    done = self._inflight[index] = threading.Event()
+                    break
+            running.wait()
+            # Loop: the item is cached now, unless the computation was cut
+            # short by a BaseException, in which case this caller takes over.
+
         try:
-            value: Any = self._compute(self._inputs[index])
-        except Exception as exc:  # stored, and re-raised at its position
-            value = exc
-        with self._lock:
-            self._results.setdefault(index, value)
+            try:
+                value: Any = self._compute(self._inputs[index])
+            except Exception as exc:  # stored, and re-raised at its position
+                value = exc
+            with self._lock:
+                self._results[index] = value
+        finally:
+            with self._lock:
+                del self._inflight[index]
+            done.set()
 
     def _resolve(self, index: int) -> T:
         """The cached result at ``index``, honouring the error mode."""
