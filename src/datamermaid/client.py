@@ -60,6 +60,21 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_FACTOR = 0.5
 MAX_BACKOFF = 30.0
 
+#: The only headers a ``public=True`` request carries.  Everything else the
+#: client would add, such as an ``Authorization`` header from ``headers=`` or a
+#: cookie, is dropped, so no credential reaches a host other than the API.
+PUBLIC_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "content-type",
+        "host",
+        "user-agent",
+    }
+)
+
 
 def default_user_agent() -> str:
     """The ``User-Agent`` sent with every request."""
@@ -123,7 +138,8 @@ class MermaidClient:
         max_retries: Extra attempts after a 429 or 5xx.  ``0`` disables retrying.
         backoff_factor: Base delay of the exponential backoff, in seconds.
             A ``Retry-After`` header wins over it.
-        headers: Extra headers sent with every request.
+        headers: Extra headers sent with every request to the MERMAID API.
+            Requests to the Zonal Stats service carry none of them.
         user_agent: Overrides [`default_user_agent`][..default_user_agent].
         transport: An ``httpx`` transport, mainly for tests.
 
@@ -435,12 +451,15 @@ class MermaidClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any = None,
+        public: bool = False,
         **kwargs: Any,
     ) -> httpx.Response:
         """Issue a request, retrying transient failures and mapping errors.
 
         ``url`` may be relative to the base URL or absolute (as in the ``next``
-        link of a paginated response).
+        link of a paginated response).  ``public=True`` is for another host: the
+        request is sent without the client's auth, and with only the headers in
+        [`PUBLIC_HEADERS`][datamermaid.client.PUBLIC_HEADERS].
         """
 
         last_error: Exception | None = None
@@ -448,7 +467,10 @@ class MermaidClient:
             self._wait_if_throttled()
             response: httpx.Response | None = None
             try:
-                response = self._http.request(method, url, params=params, json=json, **kwargs)
+                if public:
+                    response = self._send_public(method, url, params=params, json=json, **kwargs)
+                else:
+                    response = self._http.request(method, url, params=params, json=json, **kwargs)
             except httpx.TransportError as exc:
                 last_error = exc
                 if attempt >= self.max_retries:
@@ -466,6 +488,13 @@ class MermaidClient:
         # Unreachable: the final attempt either returns or raises above.
         raise MermaidConnectionError(f"{method} {url} failed") from last_error
 
+    def _send_public(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        request = self._http.build_request(method, url, **kwargs)
+        for name in list(request.headers):
+            if name.lower() not in PUBLIC_HEADERS:
+                del request.headers[name]
+        return self._http.send(request, auth=None)
+
     def request_json(
         self,
         method: str,
@@ -473,11 +502,12 @@ class MermaidClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any = None,
+        public: bool = False,
         **kwargs: Any,
     ) -> Any:
         """Issue a request and decode the JSON body (``None`` when empty)."""
 
-        response = self.request(method, url, params=params, json=json, **kwargs)
+        response = self.request(method, url, params=params, json=json, public=public, **kwargs)
         if response.status_code == 204 or not response.content:
             return None
         try:

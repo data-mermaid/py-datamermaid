@@ -360,6 +360,32 @@ def test_calling_the_endpoint_is_the_same_as_stats(client):
 
 
 @respx.mock
+def test_client_level_credential_headers_are_not_sent_to_the_service():
+    route = respx.post(RASTER_URL).mock(
+        return_value=httpx.Response(200, json=zonal_payload("raster"))
+    )
+    headers = {
+        "Authorization": "Bearer from-headers",
+        "Proxy-Authorization": "Basic secret",
+        "Cookie": "session=secret",
+        "X-Api-Key": "secret",
+    }
+    with MermaidClient(headers=headers, user_agent="probe/1.0") as client:
+        client.zonal_stats.raster.stats(POINT, url=COG)
+        sent = route.calls.last.request.headers
+        assert not {name.lower() for name in headers} & {name.lower() for name in sent}
+        assert sent["User-Agent"] == "probe/1.0"
+        assert sent["Content-Type"] == "application/json"
+        # The MERMAID API still gets the caller's headers.
+        me = respx.get("https://api.datamermaid.org/v1/me/").mock(
+            return_value=httpx.Response(200, json={"id": "1"})
+        )
+        client.me()
+        assert me.calls.last.request.headers["Authorization"] == "Bearer from-headers"
+        assert me.calls.last.request.headers["X-Api-Key"] == "secret"
+
+
+@respx.mock
 def test_no_authorization_header_is_sent_to_the_service():
     route = respx.post(RASTER_URL).mock(
         return_value=httpx.Response(200, json=zonal_payload("raster"))

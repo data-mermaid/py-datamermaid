@@ -61,8 +61,9 @@ batch = client.zonal_stats.raster.batch(sites, url="https://example.test/depth.t
 frame = batch.to_df()  # one wide row per site, keyed by `label` (the site id)
 ```
 
-Because the requests go to another host, they are sent with ``auth=None`` so the
-MERMAID credentials the client holds are never disclosed to it.  Retries,
+Because the requests go to another host, they are sent without the client's
+auth and without the headers passed to it with ``headers=``, so the MERMAID
+credentials the client holds are never disclosed to it.  Retries,
 backoff and error mapping are the client's own.
 """
 
@@ -306,9 +307,9 @@ class ZonalStatsEndpoint:
         return body
 
     def _post(self, body: dict[str, Any], *, label: Any) -> ZonalStatsResult:
-        # `auth=None` switches the client's credentials off for this request:
-        # the service is public and lives on another host.
-        data = self._client.request_json("POST", self.url, json=body, auth=None)
+        # The service is public and lives on another host, so `public=True`
+        # sends it neither the client's auth nor its extra headers.
+        data = self._client.request_json("POST", self.url, json=body, public=True)
         try:
             return ZonalStatsResult.from_api(data, aoi=body["aoi"], source=body["url"], label=label)
         except TypeError as exc:
