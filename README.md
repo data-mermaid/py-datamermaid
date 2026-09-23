@@ -524,7 +524,34 @@ test run rather than shipping as confident-sounding prose.
 
 ## Development
 
-See [CLAUDE.md](CLAUDE.md) for build and test commands.
+The project is managed with [uv](https://docs.astral.sh/uv/) and targets
+Python 3.10+. CI (`.github/workflows/ci.yml`) runs the same commands on Python
+3.10 to 3.13.
+
+```bash
+uv sync --all-extras       # create .venv with the runtime, extra and dev deps
+uv run pytest              # the test suite; all HTTP is mocked with respx
+uv run ruff check .        # lint
+uv run ruff format .       # format (CI runs it with --check)
+uv run mypy src            # type check
+```
+
+The source is in `src/datamermaid/`:
+
+- `client.py`: `MermaidClient`. It wraps an `httpx.Client` and owns the base
+  URL, the Zonal Stats URL (`zonal_stats_url`), timeouts, retry with backoff on
+  429 and 5xx, the shared throttle deadline and JSON decoding.
+- `auth/`: the `Auth` interface and its implementations: API keys, OAuth flows,
+  the Auth0 config, the loopback callback server and the token cache.
+- `exceptions.py`: the `MermaidError` hierarchy and the status-code mapping.
+- `models.py`: frozen dataclasses. `APIModel.from_api()` fills the declared
+  fields and keeps everything else in `extra`. `ZonalStatsResult` is here too.
+- `pagination.py`: `PaginatedList`, a lazy, caching view over list responses.
+- `batch.py`: `LazyBatch`, lazy and parallel results of one computation per
+  input, used by the zonal stats `batch()` methods.
+- `geometry.py`: `to_aoi`, which normalises an area of interest to GeoJSON.
+- `resources/`: one module per endpoint group. `zonal_stats.py` holds the four
+  Zonal Stats endpoints, which talk to the separate public service host.
 
 ## License
 
