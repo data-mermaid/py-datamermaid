@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import httpx
 import pytest
 import respx
@@ -181,3 +184,76 @@ def test_an_adopted_token_that_cannot_be_renewed_fails_cleanly(_no_prompt):
 
     with MermaidClient() as client, pytest.raises(AuthFlowError):
         client.me()
+
+
+# -- concurrent renewal -------------------------------------------------------
+
+
+def run_together(count, target):
+    """Run ``target`` on ``count`` threads released at the same moment."""
+
+    barrier = threading.Barrier(count)
+    results, errors = [], []
+
+    def worker():
+        barrier.wait()
+        try:
+            results.append(target())
+        except Exception as exc:  # pragma: no cover - surfaced by the assert
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert not errors
+    return results
+
+
+@respx.mock
+def test_concurrent_callers_refresh_an_expired_token_once(tmp_path):
+    auth = cached(
+        TokenSet(access_token=make_jwt(expires_in=-30), refresh_token="refresh-token"),
+        tmp_path / "tokens.json",
+    )
+
+    def slow_refresh(request):
+        time.sleep(0.05)  # widen the window a racing thread would slip into
+        return httpx.Response(200, json={"access_token": "fresh", "expires_in": 3600})
+
+    route = respx.post(TOKEN_URL).mock(side_effect=slow_refresh)
+
+    assert run_together(4, auth.access_token) == ["fresh"] * 4
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_concurrent_rejections_renew_the_token_once(tmp_path):
+    auth = cached(
+        TokenSet(access_token="stale", refresh_token="refresh-token"),
+        tmp_path / "tokens.json",
+    )
+    # `stale` is not a JWT, so it never looks expired: only the 401s renew it.
+    token = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={"access_token": "renewed", "expires_in": 3600})
+    )
+    rejected = threading.Barrier(2)
+
+    def me(request):
+        if request.headers["Authorization"] == "Bearer stale":
+            rejected.wait(timeout=5)  # both requests are rejected before either renews
+            return httpx.Response(401, json={})
+        return httpx.Response(200, json=ME)
+
+    route = respx.get(f"{BASE_URL}me/").mock(side_effect=me)
+
+    with MermaidClient(auth=auth) as client:
+        run_together(2, client.me)
+
+    assert token.call_count == 1
+    assert route.call_count == 4
+    assert [call.request.headers["Authorization"] for call in route.calls][2:] == [
+        "Bearer renewed",
+        "Bearer renewed",
+    ]

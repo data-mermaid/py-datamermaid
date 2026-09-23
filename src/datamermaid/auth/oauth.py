@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -62,7 +63,9 @@ class OAuth(Auth):
     """Log in to MERMAID through Auth0 and keep the token fresh.
 
     The first request triggers a login unless a usable token is already cached.
-    Pass ``interactive=False`` to raise
+    Renewal is single-flight: when several threads sharing one client find the
+    token expired, one of them refreshes it (or logs in) and the others wait
+    for, then use, the result.  Pass ``interactive=False`` to raise
     [`AuthFlowError`][datamermaid.exceptions.AuthFlowError] instead of prompting, which
     is what an unattended job wants.
 
@@ -152,6 +155,12 @@ class OAuth(Auth):
             self.cache = TokenCache(cache)
 
         self._tokens: TokenSet | None = None
+        # Guards every read and renewal of `_tokens`.  Re-entrant because
+        # `access_token` calls `login`, which calls `_refresh`.
+        self._lock = threading.RLock()
+        # The access token this thread last put on a request, so `refresh` can
+        # tell whether the rejected token has already been replaced.
+        self._applied = threading.local()
         self._browser_opener = browser_opener or open_browser
         self._prompt = prompt
         self._printer = printer
@@ -174,21 +183,25 @@ class OAuth(Auth):
     def tokens(self) -> TokenSet | None:
         """The token set in memory or in the cache, without logging in."""
 
-        if self._tokens is None and self.cache is not None:
-            self._tokens = self.cache.load(self.config.cache_key)
-        return self._tokens
+        with self._lock:
+            if self._tokens is None and self.cache is not None:
+                self._tokens = self.cache.load(self.config.cache_key)
+            return self._tokens
 
     def access_token(self) -> str:
         """A valid access token, refreshing or logging in if need be."""
 
-        tokens = self.tokens
-        if tokens is not None and not tokens.is_expired(now=self._now()):
-            return tokens.access_token
-        # `login` refreshes when it can and only prompts as a last resort.
-        return self.login().access_token
+        with self._lock:
+            tokens = self.tokens
+            if tokens is not None and not tokens.is_expired(now=self._now()):
+                return tokens.access_token
+            # `login` refreshes when it can and only prompts as a last resort.
+            return self.login().access_token
 
     def apply(self, request: httpx.Request) -> None:
-        request.headers["Authorization"] = f"Bearer {self.access_token()}"
+        token = self.access_token()
+        self._applied.token = token
+        request.headers["Authorization"] = f"Bearer {token}"
 
     def should_refresh(self, response: httpx.Response) -> bool:
         """Retry a rejected request once, but only if renewal could help."""
@@ -199,17 +212,30 @@ class OAuth(Auth):
         return tokens.refresh_token is not None or tokens.is_expired(now=self._now())
 
     def refresh(self) -> None:
-        """Renew the credentials, falling back to a fresh login."""
+        """Renew the credentials, falling back to a fresh login.
 
-        tokens = self.tokens
-        if tokens is not None and tokens.refresh_token is not None:
-            try:
-                self._refresh(tokens)
-            except AuthFlowError:
-                self._tokens = None
-            else:
+        If another thread renewed them after this thread's request was sent,
+        the new token is used as it is, without renewing again.
+        """
+
+        with self._lock:
+            tokens = self.tokens
+            rejected = getattr(self._applied, "token", None)
+            if (
+                tokens is not None
+                and rejected is not None
+                and tokens.access_token != rejected
+                and not tokens.is_expired(now=self._now())
+            ):
                 return
-        self.login(force=True)
+            if tokens is not None and tokens.refresh_token is not None:
+                try:
+                    self._refresh(tokens)
+                except AuthFlowError:
+                    self._tokens = None
+                else:
+                    return
+            self.login(force=True)
 
     # -- flows ------------------------------------------------------------
 
@@ -217,36 +243,39 @@ class OAuth(Auth):
         """Obtain tokens interactively and cache them.
 
         A cached token that is still valid (or refreshable) is reused unless
-        ``force`` is set.
+        ``force`` is set.  Only one login or refresh runs at a time; a thread
+        that arrives while one is running waits for it.
         """
 
-        if not force:
-            tokens = self.tokens
-            if tokens is not None and not tokens.is_expired(now=self._now()):
-                return tokens
-            if tokens is not None and tokens.refresh_token is not None:
-                try:
-                    return self._refresh(tokens)
-                except AuthFlowError:
-                    self._tokens = None
+        with self._lock:
+            if not force:
+                tokens = self.tokens
+                if tokens is not None and not tokens.is_expired(now=self._now()):
+                    return tokens
+                if tokens is not None and tokens.refresh_token is not None:
+                    try:
+                        return self._refresh(tokens)
+                    except AuthFlowError:
+                        self._tokens = None
 
-        if not self.interactive:
-            raise AuthFlowError(
-                "no usable cached MERMAID token and interactive login is disabled; "
-                "run datamermaid.login() or set MERMAID_API_KEY"
-            )
+            if not self.interactive:
+                raise AuthFlowError(
+                    "no usable cached MERMAID token and interactive login is disabled; "
+                    "run datamermaid.login() or set MERMAID_API_KEY"
+                )
 
-        with self._session() as ctx:
-            tokens = self._select_flow(ctx).authorize(self.config, ctx)
-        return self._store(tokens)
+            with self._session() as ctx:
+                tokens = self._select_flow(ctx).authorize(self.config, ctx)
+            return self._store(tokens)
 
     def logout(self) -> bool:
         """Forget the cached tokens for this tenant."""
 
-        self._tokens = None
-        if self.cache is None:
-            return False
-        return self.cache.clear(self.config.cache_key)
+        with self._lock:
+            self._tokens = None
+            if self.cache is None:
+                return False
+            return self.cache.clear(self.config.cache_key)
 
     def _select_flow(self, ctx: FlowContext) -> Flow:
         """Turn ``flow=`` into the object that will run."""
