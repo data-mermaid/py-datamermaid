@@ -383,7 +383,9 @@ class DeviceFlow(Flow):
         authorization: dict[str, Any],
     ) -> TokenSet:
         interval = _positive_number(authorization.get("interval"), DEFAULT_DEVICE_INTERVAL)
-        lifetime = _positive_number(authorization.get("expires_in"), ctx.timeout)
+        # Stop at whichever comes first: the caller's timeout, or the end of
+        # the device code's life.
+        lifetime = min(ctx.timeout, _positive_number(authorization.get("expires_in"), ctx.timeout))
         deadline = ctx.clock() + lifetime
         data = {
             "grant_type": DEVICE_GRANT_TYPE,
@@ -391,12 +393,18 @@ class DeviceFlow(Flow):
             "device_code": device_code,
         }
 
+        def timed_out() -> AuthTimeoutError:
+            return AuthTimeoutError(
+                f"timed out after {lifetime:.0f}s waiting for the device code to be approved"
+            )
+
         while True:
+            remaining = deadline - ctx.clock()
+            if remaining <= 0:
+                raise timed_out()
+            ctx.sleep(min(interval, remaining))
             if ctx.clock() >= deadline:
-                raise AuthTimeoutError(
-                    f"timed out after {lifetime:.0f}s waiting for the device code to be approved"
-                )
-            ctx.sleep(interval)
+                raise timed_out()
             try:
                 payload = post_form(ctx, config.token_url, data)
             except AuthFlowError as exc:

@@ -148,7 +148,26 @@ def test_polling_stops_when_the_device_code_expires():
     with pytest.raises(AuthTimeoutError, match="device code"):
         device_auth(recorder, clock).login()
 
-    assert route.call_count == 3  # 5s, 10s, then the 12s deadline has passed
+    assert route.call_count == 2  # at 5s and 10s; the 12s deadline ends the wait
+    assert clock.slept == [5.0, 5.0, 2.0]
+
+
+@respx.mock
+def test_polling_stops_at_the_configured_timeout_before_the_code_expires():
+    clock = FakeClock()
+    recorder = Recorder()
+    respx.post(DEVICE_CODE_URL).mock(
+        return_value=httpx.Response(200, json={**DEVICE_RESPONSE, "expires_in": 20})
+    )
+    route = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(403, json={"error": "authorization_pending"})
+    )
+
+    with pytest.raises(AuthTimeoutError, match="after 2s"):
+        device_auth(recorder, clock, timeout=2).login()
+
+    assert route.call_count == 0
+    assert clock.now == 2.0
 
 
 @respx.mock
