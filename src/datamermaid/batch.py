@@ -231,9 +231,11 @@ class LazyBatch(Generic[I, T]):
                 if future is not None:
                     future.result()
                 yield self._resolve(index)
-                # Refill after the hand-off, so a consumer that stops here has
-                # caused at most `max_workers` computations.
-                prefetch()
+                # Refill after the hand-off, and only when a slot was used, so
+                # a consumer that stops here has caused at most `max_workers`
+                # computations.  A cached item frees no slot.
+                if future is not None:
+                    prefetch()
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 

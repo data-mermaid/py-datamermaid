@@ -283,6 +283,23 @@ def test_results_with_max_workers_larger_than_the_batch():
     assert batch.results() == [0, 10]
 
 
+def test_iterating_a_cached_prefix_keeps_the_window_bounded():
+    spy = Spy()
+    batch = LazyBatch(range(100), spy, max_workers=2)
+    batch[0:50]
+    spy.calls.clear()
+
+    iterator = iter(batch)
+    for _ in range(50):
+        next(iterator)  # all cached: no slot is used, so nothing is refilled
+    deadline = time.monotonic() + TIMEOUT
+    while len(spy.calls) < 2 and time.monotonic() < deadline:
+        time.sleep(0.001)
+    iterator.close()
+
+    assert sorted(spy.calls) == [50, 51]
+
+
 def test_concurrent_reads_of_one_item_compute_it_once():
     started = threading.Event()
     release = threading.Event()
