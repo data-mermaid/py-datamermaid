@@ -27,7 +27,7 @@ from datamermaid import (
     AuthenticationError,
     AuthFlowError,
     MermaidClient,
-    MermaidError,
+    MermaidConnectionError,
     NotFoundError,
     Project,
 )
@@ -179,13 +179,22 @@ def main() -> int:
             f"{args.radius:g} m around each site"
         )
 
-        try:
-            frame = batch.to_df()
-        except MermaidError as error:
-            # `errors="return"` keeps per-site failures out of this, so what is
-            # left is the client refusing to talk to the service at all.
-            print(f"\nThe Zonal Stats service could not be reached: {error}", file=sys.stderr)
-            return 0
+        # With `errors="return"` nothing here raises: each failed site comes
+        # back as a row whose `error` column holds the exception.
+        frame = batch.to_df()
+
+    errors = frame.get("error")
+    if (
+        errors is not None
+        and errors.map(lambda error: isinstance(error, MermaidConnectionError)).all()
+    ):
+        # Every request failed to connect, so the service itself is down or
+        # the URL is wrong.  One message reads better than a table of failures.
+        print(
+            f"\nThe Zonal Stats service could not be reached: {errors.iloc[0]}",
+            file=sys.stderr,
+        )
+        return 0
 
     # Rows come back in input order, so row i belongs to site i whichever
     # worker finished first.  `label` is the site id; the name reads better.
