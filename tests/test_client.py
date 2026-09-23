@@ -157,6 +157,23 @@ def test_note_throttle_keeps_the_later_deadline(clock):
     assert clock.sleeps == [2.0]
 
 
+def test_a_deadline_extended_during_the_sleep_is_waited_out_too(clock, monkeypatch):
+    with MermaidClient() as client:
+        client._note_throttle(10.0)
+
+        def sleep(seconds):
+            clock.sleep(seconds)
+            if len(clock.sleeps) == 1:
+                # Another worker's 429 lands while this one sleeps.
+                client._note_throttle(20.0)
+
+        monkeypatch.setattr("datamermaid.client.time.sleep", sleep)
+        client._wait_if_throttled()
+
+    assert clock.sleeps == [10.0, 20.0]
+    assert clock.now == 1030.0
+
+
 def test_a_zero_delay_does_not_throttle(clock):
     with MermaidClient() as client:
         client._note_throttle(0.0)

@@ -426,11 +426,18 @@ class MermaidClient:
         return min(backoff + random.uniform(0, self.backoff_factor), MAX_BACKOFF)
 
     def _wait_if_throttled(self) -> None:
-        """Sleep until the client-wide throttle deadline has passed, if it has not."""
+        """Sleep until the client-wide throttle deadline has passed, if it has not.
 
-        with self._throttle_lock:
-            remaining = self._throttled_until - time.monotonic()
-        if remaining > 0:
+        Another thread may push the deadline back while this one sleeps, so the
+        deadline is read again after every sleep.  The lock is never held while
+        sleeping.
+        """
+
+        while True:
+            with self._throttle_lock:
+                remaining = self._throttled_until - time.monotonic()
+            if remaining <= 0:
+                return
             time.sleep(remaining)
 
     def _note_throttle(self, delay: float) -> None:
