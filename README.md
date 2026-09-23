@@ -282,8 +282,10 @@ whole project becomes one table:
 ```python
 with MermaidClient() as client:
     project = client.projects("d5491b25-4a5f-401b-a50f-bb80fd1df78f")
+    # A site without a location has no area to measure, so leave it out.
+    sites = [site for site in project.sites.list() if site.location]
     batch = client.zonal_stats.raster.batch(
-        project.sites.list(),
+        sites,
         url="https://example.test/depth.tif",
         stats=["mean"],
         radius=500,

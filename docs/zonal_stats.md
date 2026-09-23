@@ -192,7 +192,7 @@ Every endpoint also has a `batch` method: one request per area of interest, run
 on a thread pool. Pass it any iterable of areas, such as a project's sites.
 
 ```python
-sites = client.projects(project_id).sites.list()
+sites = [site for site in client.projects(project_id).sites.list() if site.location]
 
 batch = client.zonal_stats.raster.batch(
     sites,
@@ -205,6 +205,11 @@ len(batch)  # the number of sites, with no statistics request sent yet
 batch[0].label  # one request: the first site's id
 ```
 
+A site's `location` is optional, and a site without one has no area to
+measure. The filter leaves those sites out. Without it, each such site fails
+with a `ValueError` at its position, and with the default `errors="raise"` that
+stops `to_df()` from returning a table at all.
+
 `batch(...)` reads the areas in full when you call it, because it needs their
 number and their labels. A lazy list such as `sites.list()` therefore fetches
 every page of sites at that call, and an error from the sites listing is raised
@@ -213,10 +218,10 @@ there. Only the statistics requests wait.
 `batch` returns a [`LazyBatch`][datamermaid.batch.LazyBatch], which is to a list
 of independent requests what
 [`PaginatedList`][datamermaid.pagination.PaginatedList] is to a paginated
-endpoint. No statistics request runs until you iterate, index or export it. Indexing computes
-one item, a slice computes what it covers, and iteration keeps at most
-`max_workers` requests ahead of you, so a loop that stops early wastes at most
-one window of work. Every result is cached by position, so nothing runs twice.
+endpoint. No statistics request runs until you iterate, index or export it.
+Indexing computes one item, a slice computes what it covers, and iteration
+keeps at most `max_workers` requests ahead of you, so a loop that stops early
+wastes at most one window of work. Every result is cached by position, so nothing runs twice.
 
 `max_workers` is how many requests are in flight at once, eight by default. The
 options are checked before anything runs, so a misspelled statistic or an empty
