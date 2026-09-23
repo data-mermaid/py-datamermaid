@@ -11,11 +11,18 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+
+if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
+    import msvcrt
+else:
+    import fcntl
 
 from .jwt import token_expires_at
 
@@ -53,6 +60,38 @@ def _seconds(value: Any) -> float | None:
         except ValueError:
             return None
     return None
+
+
+@contextlib.contextmanager
+def _exclusive(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on the file at ``path``, across processes and threads.
+
+    The lock file is created if need be and left in place afterwards: deleting
+    it would let a waiting process lock a file another has just replaced.
+    """
+
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, CACHE_FILE_MODE)
+    try:
+        if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
+            while True:
+                try:
+                    msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    continue  # LK_LOCK gives up after ten seconds; keep waiting
+            try:
+                yield
+            finally:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def _chmod(path: Path, mode: int) -> None:
@@ -163,6 +202,11 @@ class TokenCache:
 
     The key is
     [`Auth0Config.cache_key`][datamermaid.auth.config.Auth0Config.cache_key].
+
+    [`save`][.save] and [`clear`][.clear] each read the file, change it and
+    write it back while holding a lock on a ``.lock`` file beside it, so two
+    clients or processes updating different entries never lose each other's
+    changes.
     """
 
     def __init__(self, path: Path | str | None = None) -> None:
@@ -186,7 +230,21 @@ class TokenCache:
         entries = data.get("tokens")
         return entries if isinstance(entries, dict) else {}
 
-    def _write(self, entries: dict[str, Any]) -> None:
+    @property
+    def lock_path(self) -> Path:
+        """The lock file that serialises updates to ``path``."""
+
+        return self.path.with_name(f".{self.path.name}.lock")
+
+    @contextlib.contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """Hold the cache's lock for one read-modify-write."""
+
+        self._prepare_directory()
+        with _exclusive(self.lock_path):
+            yield
+
+    def _prepare_directory(self) -> None:
         directory = self.path.parent
         try:
             directory.mkdir(parents=True)
@@ -200,6 +258,8 @@ class TokenCache:
         if created or directory.resolve() == default_cache_path().parent.resolve():
             _chmod(directory, CACHE_DIR_MODE)
 
+    def _write(self, entries: dict[str, Any]) -> None:
+        directory = self.path.parent
         payload = json.dumps({"version": CACHE_VERSION, "tokens": entries}, indent=2)
         # Write a private temporary file beside the target and rename it into
         # place: a crash or a concurrent reader never sees half a cache, and
@@ -229,9 +289,10 @@ class TokenCache:
     def save(self, key: str, tokens: TokenSet) -> None:
         """Store ``tokens`` under ``key`` with 0600 permissions."""
 
-        entries = self._read()
-        entries[key] = tokens.to_dict()
-        self._write(entries)
+        with self._transaction():
+            entries = self._read()
+            entries[key] = tokens.to_dict()
+            self._write(entries)
 
     def clear(self, key: str | None = None) -> bool:
         """Forget ``key`` (or every entry when it is ``None``).
@@ -239,18 +300,21 @@ class TokenCache:
         Returns whether anything was removed.
         """
 
-        if key is None:
-            try:
-                self.path.unlink()
-            except OSError:
-                return False
-            return True
+        if not self.path.exists():
+            return False  # nothing to clear, so no directory to create for the lock
+        with self._transaction():
+            if key is None:
+                try:
+                    self.path.unlink()
+                except OSError:
+                    return False
+                return True
 
-        entries = self._read()
-        if entries.pop(key, None) is None:
-            return False
-        if entries:
-            self._write(entries)
-        else:
-            self.path.unlink(missing_ok=True)
-        return True
+            entries = self._read()
+            if entries.pop(key, None) is None:
+                return False
+            if entries:
+                self._write(entries)
+            else:
+                self.path.unlink(missing_ok=True)
+            return True

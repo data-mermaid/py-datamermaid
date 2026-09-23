@@ -206,6 +206,9 @@ Expiry is read from the access token's `exp` claim, decoded but never verified
 locally, with a 60 second margin. An expired token is refreshed silently and
 only a failed refresh prompts a new login. The file is written by rename, so an
 interrupted save never truncates the tokens of the tenants it was not touching.
+Each save or logout holds a lock on `.tokens.json.lock` beside the file while it
+reads, changes and writes it, so two processes updating different tenants keep
+both updates. The lock file stays in place between runs.
 
 Keep tokens in memory only, or move the file:
 

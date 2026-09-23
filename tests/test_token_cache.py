@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import threading
 import time
 
 import pytest
@@ -198,7 +200,7 @@ def test_saving_leaves_no_temporary_files_behind(tmp_path):
     cache = TokenCache(tmp_path / "tokens.json")
     cache.save(KEY, TokenSet(access_token="a"))
     cache.save("other", TokenSet(access_token="b"))
-    assert [path.name for path in tmp_path.iterdir()] == ["tokens.json"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".tokens.json.lock", "tokens.json"]
 
 
 def test_a_failed_save_leaves_the_previous_cache_intact(tmp_path, monkeypatch):
@@ -213,4 +215,71 @@ def test_a_failed_save_leaves_the_previous_cache_intact(tmp_path, monkeypatch):
         cache.save(KEY, TokenSet(access_token="second"))
 
     assert cache.load(KEY).access_token == "first"
-    assert [path.name for path in tmp_path.iterdir()] == ["tokens.json"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [".tokens.json.lock", "tokens.json"]
+
+
+# -- concurrent updates -----------------------------------------------------
+
+
+def _racing_reads(monkeypatch, parties):
+    """Make each `_read` pause until every party has read, if they can.
+
+    Without a lock around the whole update, every party reads the same old
+    file before any of them writes, and all but one update is lost.  With the
+    lock only one party can be inside at a time, so the barrier times out and
+    each party carries on in turn.
+    """
+
+    barrier = threading.Barrier(parties)
+    original = TokenCache._read
+
+    def read(self):
+        entries = original(self)
+        with contextlib.suppress(threading.BrokenBarrierError):
+            barrier.wait(timeout=0.2)
+        return entries
+
+    monkeypatch.setattr(TokenCache, "_read", read)
+
+
+def _together(*targets):
+    threads = [threading.Thread(target=target) for target in targets]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+
+def test_concurrent_saves_from_two_caches_keep_both_entries(tmp_path, monkeypatch):
+    path = tmp_path / "tokens.json"
+    first, second = TokenCache(path), TokenCache(path)
+    _racing_reads(monkeypatch, 2)
+
+    _together(
+        lambda: first.save("a", TokenSet(access_token="a")),
+        lambda: second.save("b", TokenSet(access_token="b")),
+    )
+
+    assert TokenCache(path).load("a").access_token == "a"
+    assert TokenCache(path).load("b").access_token == "b"
+
+
+def test_a_concurrent_clear_and_save_do_not_undo_each_other(tmp_path, monkeypatch):
+    path = tmp_path / "tokens.json"
+    TokenCache(path).save("gone", TokenSet(access_token="old"))
+    _racing_reads(monkeypatch, 2)
+
+    _together(
+        lambda: TokenCache(path).clear("gone"),
+        lambda: TokenCache(path).save("kept", TokenSet(access_token="new")),
+    )
+
+    assert TokenCache(path).load("gone") is None
+    assert TokenCache(path).load("kept").access_token == "new"
+
+
+def test_clearing_a_missing_cache_creates_nothing(tmp_path):
+    cache = TokenCache(tmp_path / "absent" / "tokens.json")
+    assert cache.clear() is False
+    assert cache.clear("key") is False
+    assert not (tmp_path / "absent").exists()
