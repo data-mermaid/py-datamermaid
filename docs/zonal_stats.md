@@ -293,10 +293,19 @@ batch.fetched  # {0: ZonalStatsResult(...), 1: MermaidAPIError(...)}
 
 The workers share the client's retry and throttle machinery. If one of them gets
 a `429`, the client-wide deadline it sets pauses every worker, not just the
-thread that saw it, and the wait honours the `Retry-After` header. A batch of a
-hundred areas therefore backs off as one client rather than as a hundred
-independent retriers. Raising `max_workers` past what the service allows buys
-nothing.
+thread that saw it. A batch of a hundred areas therefore backs off as one client
+rather than as a hundred independent retriers. Raising `max_workers` past what
+the service allows buys nothing.
+
+The wait is the `Retry-After` header when the service sends one, but never more
+than 30 seconds. If the service asks for a longer wait, the client retries after
+30 seconds, and once its `max_retries` retries are spent it raises
+`RateLimitError`.
+
+The deadline belongs to the client, not to one host. A `429` from the Zonal
+Stats service also pauses MERMAID API calls made on the same client, and a
+`429` from the MERMAID API pauses the zonal stats workers. To keep them apart,
+use a separate `MermaidClient` for each.
 
 ## Errors
 

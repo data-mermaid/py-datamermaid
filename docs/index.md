@@ -126,7 +126,7 @@ with MermaidClient() as client:
 | `base_url` | `MERMAID_API_URL` | `https://api.datamermaid.org/v1/` |
 | `zonal_stats_url` | `MERMAID_ZONAL_STATS_URL` | `https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/` |
 | `timeout` | | `30.0` seconds |
-| `max_retries` | | `3` (429 and 5xx, exponential backoff honouring `Retry-After`) |
+| `max_retries` | | `3` (429 and 5xx, exponential backoff honouring `Retry-After` up to 30 s) |
 
 The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
 [`datamermaid.DEV_BASE_URL`][datamermaid.client.DEV_BASE_URL]. The

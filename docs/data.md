@@ -265,8 +265,8 @@ for record in species:  # this is where a NotFoundError or ServerError appears
 ```
 
 Rate limits and server errors are retried automatically, three times by default,
-with exponential backoff that honours a `Retry-After` header. Tune or disable it
-per client:
+with exponential backoff that honours a `Retry-After` header up to 30 seconds.
+Tune or disable it per client:
 
 ```python
 from datamermaid import MermaidClient

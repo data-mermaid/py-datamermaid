@@ -101,8 +101,11 @@ class MermaidClient:
     The client is safe to share between threads, which is how a
     [`LazyBatch`][datamermaid.batch.LazyBatch] fans requests out.  Throttling is
     cooperative: a ``429`` seen on any thread sets a client-wide deadline
-    (``Retry-After``, or the computed backoff) that every request waits on before
-    it is sent, so the workers back off together instead of one at a time.
+    (``Retry-After``, or the computed backoff, capped at 30 seconds) that every
+    request waits on before it is sent, so the workers back off together instead
+    of one at a time.  The deadline is shared by both hosts: a ``429`` from the
+    Zonal Stats service also pauses MERMAID API calls on the same client, and the
+    reverse.
 
     Args:
         auth: Credential provider.  Mutually exclusive with ``api_key``.
