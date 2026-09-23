@@ -169,12 +169,29 @@ def test_expires_in_may_arrive_as_a_string(tmp_path):
     assert TokenSet.from_response({"access_token": "a", "expires_in": "soon"}).expires_at is None
 
 
-def test_the_cache_directory_is_only_readable_by_the_owner(tmp_path):
+def test_the_default_cache_directory_is_only_readable_by_the_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     directory = tmp_path / "datamermaid"
     directory.mkdir(mode=0o755)
+    directory.chmod(0o755)
+    TokenCache().save(KEY, TokenSet(access_token="a"))
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_a_directory_made_for_the_cache_is_only_readable_by_the_owner(tmp_path):
+    directory = tmp_path / "custom" / "cache"
+    TokenCache(directory / "tokens.json").save(KEY, TokenSet(access_token="a"))
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_a_callers_existing_directory_keeps_its_permissions(tmp_path):
+    directory = tmp_path / "shared"
+    directory.mkdir()
+    directory.chmod(0o755)
     cache = TokenCache(directory / "tokens.json")
     cache.save(KEY, TokenSet(access_token="a"))
-    assert directory.stat().st_mode & 0o777 == 0o700
+    assert directory.stat().st_mode & 0o777 == 0o755
+    assert cache.path.stat().st_mode & 0o777 == 0o600
 
 
 def test_saving_leaves_no_temporary_files_behind(tmp_path):

@@ -188,10 +188,17 @@ class TokenCache:
 
     def _write(self, entries: dict[str, Any]) -> None:
         directory = self.path.parent
-        directory.mkdir(parents=True, exist_ok=True)
-        # mkdir's mode= is masked by the umask and does nothing to a directory
-        # that already exists, so set the permissions explicitly.
-        _chmod(directory, CACHE_DIR_MODE)
+        try:
+            directory.mkdir(parents=True)
+            created = True
+        except FileExistsError:
+            created = False
+        # Tighten the directory only when it is ours: the SDK's own cache
+        # directory, or one made just now for this file.  A caller's existing
+        # directory keeps its permissions; the token file is private anyway.
+        # mkdir's mode= is masked by the umask, so set the mode explicitly.
+        if created or directory.resolve() == default_cache_path().parent.resolve():
+            _chmod(directory, CACHE_DIR_MODE)
 
         payload = json.dumps({"version": CACHE_VERSION, "tokens": entries}, indent=2)
         # Write a private temporary file beside the target and rename it into
