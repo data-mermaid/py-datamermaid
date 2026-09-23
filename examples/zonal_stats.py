@@ -113,6 +113,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# Also in project_data.py, on purpose: each example is a standalone PEP 723 script
+# that runs with `uv run`, so the examples share no helper module.
 def pick_project(client: MermaidClient, project_id: str | None) -> Project | None:
     """Resolve the project to read, announcing an auto-selected one."""
 

@@ -88,6 +88,8 @@ def show(title: str, frame: pd.DataFrame, columns: list[str]) -> None:
     print(frame[present].head().to_string(index=False))
 
 
+# Also in zonal_stats.py, on purpose: each example is a standalone PEP 723 script
+# that runs with `uv run`, so the examples share no helper module.
 def pick_project(client: MermaidClient, project_id: str | None) -> Project | None:
     """Resolve the project to read, announcing an auto-selected one."""
 

@@ -9,6 +9,9 @@ nothing has to be installed first:
 uv run examples/reference_data.py
 ```
 
+For the same reason the examples import nothing from each other, so a few small
+helpers, such as `pick_project`, are repeated between them on purpose.
+
 ## Credentials
 
 Reference data and the public summaries need none. The rest wants either an API
