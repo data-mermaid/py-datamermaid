@@ -292,9 +292,10 @@ with MermaidClient() as client:
     depth = batch.to_df()  # one wide row per site: label, source, band_1_mean, ...
 ```
 
-Nothing is requested until the batch is iterated, indexed or exported, the
-workers share the client's rate-limit backoff, and `errors="return"` keeps a
-partly failing batch usable. See the
+The sites are fetched when `batch(...)` is called, but no statistics request is
+sent until the batch is iterated, indexed or exported. The workers share the
+client's rate-limit backoff, and `errors="return"` keeps a partly failing batch
+usable. See the
 [zonal statistics guide](https://data-mermaid.github.io/py-datamermaid/zonal_stats/)
 for the STAC routes, the weighting methods and the long-form export.
 

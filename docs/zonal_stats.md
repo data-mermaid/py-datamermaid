@@ -201,14 +201,19 @@ batch = client.zonal_stats.raster.batch(
     radius=500,
     max_workers=4,
 )
-len(batch)  # the number of sites, with no request sent yet
+len(batch)  # the number of sites, with no statistics request sent yet
 batch[0].label  # one request: the first site's id
 ```
+
+`batch(...)` reads the areas in full when you call it, because it needs their
+number and their labels. A lazy list such as `sites.list()` therefore fetches
+every page of sites at that call, and an error from the sites listing is raised
+there. Only the statistics requests wait.
 
 `batch` returns a [`LazyBatch`][datamermaid.batch.LazyBatch], which is to a list
 of independent requests what
 [`PaginatedList`][datamermaid.pagination.PaginatedList] is to a paginated
-endpoint. Nothing runs until you iterate, index or export it. Indexing computes
+endpoint. No statistics request runs until you iterate, index or export it. Indexing computes
 one item, a slice computes what it covers, and iteration keeps at most
 `max_workers` requests ahead of you, so a loop that stops early wastes at most
 one window of work. Every result is cached by position, so nothing runs twice.

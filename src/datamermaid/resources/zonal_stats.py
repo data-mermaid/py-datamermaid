@@ -413,8 +413,10 @@ class ZonalStatsEndpoint:
     ) -> LazyBatch[BatchItem, ZonalStatsResult]:
         """One statistics request per area of interest, run lazily on a thread pool.
 
-        Nothing is sent until the batch is iterated, indexed or materialised;
-        see [`LazyBatch`][datamermaid.batch.LazyBatch].  Each result carries a
+        No statistics request is sent until the batch is iterated, indexed or
+        materialised; see [`LazyBatch`][datamermaid.batch.LazyBatch].  ``aois``
+        itself is read in full here, so a lazy list such as ``sites.list()``
+        fetches all its pages at this call.  Each result carries a
         ``label``, so ``batch.to_df()`` is one wide row per AOI.
 
         Args:
