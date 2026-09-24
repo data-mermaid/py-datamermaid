@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+# GitHub Packages has no Python registry, so the wheel and sdist are attached
+# to a GitHub Release instead. They install straight from the release URL:
+#   pip install https://github.com/data-mermaid/py-datamermaid/releases/download/vX.Y.Z/datamermaid-X.Y.Z-py3-none-any.whl
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The tag is the release name, but `pyproject.toml` is what the package
+      # reports as its version, so a mismatch would publish a mislabelled
+      # wheel.
+      - name: Check the tag matches the project version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          project_version="$(uv version --short)"
+          if [ "$tag_version" != "$project_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject.toml version $project_version"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          uv sync --all-extras
+          uv run pytest
+
+      - name: Build
+        run: uv build
+
+      # Installs the built wheel into a clean environment, away from the
+      # source tree, to catch files missing from the wheel.
+      - name: Smoke test the wheel
+        run: |
+          uv run --isolated --no-project --with dist/*.whl \
+            python -c "import datamermaid; print(datamermaid.__version__)"
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
