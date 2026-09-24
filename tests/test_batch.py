@@ -1,9 +1,4 @@
-"""`LazyBatch` on its own: laziness, the bounded window, caching and error modes.
-
-The compute functions here are fakes.  Concurrency is proved with a `Barrier`
-that would time out if two computations never overlapped, and the window bound
-with a counter under a lock; nothing sleeps for real.
-"""
+"""Eager batches: ordering, bounded concurrency, failures and export."""
 
 from __future__ import annotations
 
@@ -13,7 +8,7 @@ import time
 import pytest
 
 import datamermaid
-from datamermaid import LazyBatch
+from datamermaid import Batch
 from datamermaid.batch import DEFAULT_MAX_WORKERS
 
 TIMEOUT = 5.0
@@ -46,24 +41,8 @@ class Spy:
                 self.in_flight -= 1
 
 
-# -- construction -----------------------------------------------------------
-
-
-def test_construction_does_no_work():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy, max_workers=3)
-    assert spy.calls == []
-    assert len(batch) == 10
-    assert batch.fetched == {}
-    assert batch.inputs == list(range(10))
-    assert batch.max_workers == 3
-    assert batch.errors == "raise"
-    assert spy.calls == []
-    assert repr(batch) == "<LazyBatch computed=0/10 max_workers=3>"
-
-
 def test_defaults():
-    batch = LazyBatch([], lambda value: value)
+    batch = Batch([], lambda value: value)
     assert batch.max_workers == DEFAULT_MAX_WORKERS == 8
     assert len(batch) == 0
     assert list(batch) == []
@@ -71,7 +50,7 @@ def test_defaults():
 
 
 def test_inputs_are_consumed_once():
-    batch = LazyBatch(iter([1, 2, 3]), lambda value: value)
+    batch = Batch(iter([1, 2, 3]), lambda value: value)
     assert len(batch) == 3
     assert batch.results() == [1, 2, 3]
     assert batch.results() == [1, 2, 3]
@@ -80,39 +59,22 @@ def test_inputs_are_consumed_once():
 @pytest.mark.parametrize("max_workers", [0, -1])
 def test_max_workers_must_be_positive(max_workers):
     with pytest.raises(ValueError, match="max_workers"):
-        LazyBatch([1], lambda value: value, max_workers=max_workers)
+        Batch([1], lambda value: value, max_workers=max_workers)
 
 
 def test_unknown_error_mode_is_rejected():
     with pytest.raises(ValueError, match="errors"):
-        LazyBatch([1], lambda value: value, errors="ignore")
+        Batch([1], lambda value: value, errors="ignore")
 
 
 def test_is_exported():
-    assert datamermaid.LazyBatch is LazyBatch
-    assert "LazyBatch" in datamermaid.__all__
-
-
-# -- iteration --------------------------------------------------------------
-
-
-def test_iteration_is_in_input_order_and_cached():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy, max_workers=3)
-
-    assert list(batch) == [value * 10 for value in range(10)]
-    assert sorted(spy.calls) == list(range(10))
-    assert len(spy.calls) == 10
-
-    # A second pass comes from the cache.
-    assert list(batch) == [value * 10 for value in range(10)]
-    assert len(spy.calls) == 10
-    assert repr(batch) == "<LazyBatch computed=10/10 max_workers=3>"
+    assert datamermaid.Batch is Batch
+    assert "Batch" in datamermaid.__all__
 
 
 def test_never_more_than_max_workers_in_flight():
     spy = Spy(delay=0.005)
-    batch = LazyBatch(range(10), spy, max_workers=3)
+    batch = Batch(range(10), spy, max_workers=3)
 
     assert list(batch) == [value * 10 for value in range(10)]
     assert spy.peak <= 3
@@ -128,301 +90,42 @@ def test_at_least_two_run_concurrently():
         barrier.wait()
         return value
 
-    batch = LazyBatch(range(2), compute, max_workers=2)
+    batch = Batch(range(2), compute, max_workers=2)
     assert list(batch) == [0, 1]
 
 
 def test_max_workers_one_is_serial():
     spy = Spy(delay=0.001)
-    batch = LazyBatch(range(5), spy, max_workers=1)
+    batch = Batch(range(5), spy, max_workers=1)
     assert list(batch) == [0, 10, 20, 30, 40]
     assert spy.peak == 1
     assert spy.calls == [0, 1, 2, 3, 4]
 
 
-def test_breaking_early_wastes_at_most_a_window():
-    started = threading.Event()
-    release = threading.Event()
-    spy = Spy()
-    lock = threading.Lock()
-    calls = []
-
-    def compute(value):
-        with lock:
-            calls.append(value)
-        if value != 0:
-            # Hold the prefetched items until the consumer has broken out, so
-            # the count below is a hard bound and not a race.
-            started.set()
-            release.wait(TIMEOUT)
-        return spy(value)
-
-    batch = LazyBatch(range(10), compute, max_workers=3)
-    for result in batch:
-        assert result == 0
-        break
-    started.wait(TIMEOUT)
-    release.set()
-
-    # The consumer stopped, so nothing beyond the first window was ever started.
-    deadline = time.monotonic() + TIMEOUT
-    while len(batch.fetched) < len(calls) and time.monotonic() < deadline:
-        time.sleep(0.001)
-    assert len(calls) <= 3
-    assert 0 in calls
-    assert len(batch.fetched) <= 3
-
-
-def test_iteration_resumes_from_the_cache():
-    spy = Spy()
-    batch = LazyBatch(range(6), spy, max_workers=2)
-    assert batch[4] == 40
-    assert list(batch) == [0, 10, 20, 30, 40, 50]
-    assert len(spy.calls) == 6
-    assert spy.calls.count(4) == 1
-
-
-# -- indexing ---------------------------------------------------------------
-
-
-def test_indexing_computes_exactly_one_item():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy, max_workers=3)
-
-    assert batch[7] == 70
-    assert spy.calls == [7]
-    assert batch.fetched == {7: 70}
-    assert repr(batch) == "<LazyBatch computed=1/10 max_workers=3>"
-
-    assert batch[7] == 70
-    assert spy.calls == [7]
-
-
-def test_negative_index_uses_the_known_length():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy)
-    assert batch[-1] == 90
-    assert spy.calls == [9]
-
-
-@pytest.mark.parametrize("index", [10, -11])
-def test_index_out_of_range(index):
-    spy = Spy()
-    batch = LazyBatch(range(10), spy)
-    with pytest.raises(IndexError):
-        batch[index]
-    assert spy.calls == []
-
-
-def test_slice_computes_only_its_items_in_parallel():
-    barrier = threading.Barrier(2, timeout=TIMEOUT)
-    spy = Spy()
-
-    def compute(value):
-        barrier.wait()  # would deadlock if the slice ran serially
-        return spy(value)
-
-    batch = LazyBatch(range(10), compute, max_workers=2)
-    assert batch[2:4] == [20, 30]
-    assert sorted(spy.calls) == [2, 3]
-
-
-def test_slice_of_three_computes_exactly_three():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy, max_workers=3)
-    assert batch[2:5] == [20, 30, 40]
-    assert sorted(spy.calls) == [2, 3, 4]
-    assert batch.fetched == {2: 20, 3: 30, 4: 40}
-
-
-def test_slice_with_step_and_negative_bounds():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy)
-    assert batch[-3::2] == [70, 90]
-    assert sorted(spy.calls) == [7, 9]
-    assert batch[::-4] == [90, 50, 10]
-    assert sorted(spy.calls) == [1, 5, 7, 9]
-
-
-def test_empty_slice_computes_nothing():
-    spy = Spy()
-    batch = LazyBatch(range(10), spy)
-    assert batch[5:2] == []
-    assert spy.calls == []
-
-
-# -- results ----------------------------------------------------------------
-
-
-def test_results_computes_everything_in_parallel():
-    barrier = threading.Barrier(3, timeout=TIMEOUT)
-    spy = Spy()
-
-    def compute(value):
-        barrier.wait()
-        return spy(value)
-
-    batch = LazyBatch(range(3), compute, max_workers=3)
-    # The barrier only opens once all three are inside `compute` at the same time.
-    assert batch.results() == [0, 10, 20]
-    assert sorted(spy.calls) == [0, 1, 2]
-
-
-def test_results_reuses_cached_items():
-    spy = Spy()
-    batch = LazyBatch(range(5), spy)
-    batch[1]
-    batch[3]
-    assert batch.results() == [0, 10, 20, 30, 40]
-    assert sorted(spy.calls) == [0, 1, 2, 3, 4]
-
-
 def test_results_with_max_workers_larger_than_the_batch():
     spy = Spy()
-    batch = LazyBatch(range(2), spy, max_workers=50)
+    batch = Batch(range(2), spy, max_workers=50)
     assert batch.results() == [0, 10]
-
-
-def test_iterating_a_cached_prefix_keeps_the_window_bounded():
-    spy = Spy()
-    batch = LazyBatch(range(100), spy, max_workers=2)
-    batch[0:50]
-    spy.calls.clear()
-
-    iterator = iter(batch)
-    for _ in range(50):
-        next(iterator)  # all cached: no slot is used, so nothing is refilled
-    deadline = time.monotonic() + TIMEOUT
-    while len(spy.calls) < 2 and time.monotonic() < deadline:
-        time.sleep(0.001)
-    iterator.close()
-
-    assert sorted(spy.calls) == [50, 51]
-
-
-def test_concurrent_reads_of_one_item_compute_it_once():
-    started = threading.Event()
-    release = threading.Event()
-    spy = Spy()
-
-    def compute(value):
-        started.set()
-        assert release.wait(TIMEOUT)
-        return spy(value)
-
-    batch = LazyBatch(range(3), compute)
-    seen = []
-    readers = [threading.Thread(target=lambda: seen.append(batch[0])) for _ in range(4)]
-    readers[0].start()
-    assert started.wait(TIMEOUT)
-    for reader in readers[1:]:
-        reader.start()
-    # The later readers are now waiting on the first one's computation.
-    release.set()
-    for reader in readers:
-        reader.join(TIMEOUT)
-
-    assert seen == [0, 0, 0, 0]
-    assert spy.calls == [0]
-
-
-def test_reading_an_item_a_closed_iterator_left_running_waits_for_it():
-    started = threading.Event()
-    release = threading.Event()
-    spy = Spy()
-
-    def compute(value):
-        if value == 1:
-            started.set()
-            assert release.wait(TIMEOUT)
-        return spy(value)
-
-    batch = LazyBatch(range(3), compute, max_workers=2)
-    iterator = iter(batch)
-    assert next(iterator) == 0
-    assert started.wait(TIMEOUT)
-    iterator.close()  # item 1 is still running on the abandoned pool
-
-    threading.Timer(0.05, release.set).start()
-    assert batch[1] == 10
-    assert spy.calls.count(1) == 1
-
-
-def test_an_interrupted_computation_is_retried_by_the_next_reader():
-    attempts = []
-
-    def compute(value):
-        attempts.append(value)
-        if len(attempts) == 1:
-            raise KeyboardInterrupt
-        return value * 10
-
-    batch = LazyBatch(range(1), compute)
-    with pytest.raises(KeyboardInterrupt):
-        batch[0]
-    assert batch.fetched == {}
-    assert batch[0] == 0
-    assert attempts == [0, 0]
-
-
-# -- errors -----------------------------------------------------------------
-
-
-def test_raise_mode_raises_when_the_failed_item_is_reached():
-    spy = Spy(fail_at={2})
-    batch = LazyBatch(range(5), spy, max_workers=2)
-    seen = []
-    with pytest.raises(ValueError, match="boom 2"):
-        for result in batch:
-            seen.append(result)
-    assert seen == [0, 10]
-
-    # The items after the failure are not lost: they are cached or computable.
-    assert batch[3] == 30
-    assert batch[4] == 40
-    assert isinstance(batch.fetched[2], ValueError)
-    # The failure itself is cached; it is not recomputed.
-    with pytest.raises(ValueError, match="boom 2"):
-        batch[2]
-    assert spy.calls.count(2) == 1
 
 
 def test_return_mode_yields_the_exception_in_place():
     spy = Spy(fail_at={2})
-    batch = LazyBatch(range(5), spy, max_workers=2, errors="return")
+    batch = Batch(range(5), spy, max_workers=2, errors="return")
 
     results = list(batch)
 
     assert results[:2] == [0, 10]
-    assert isinstance(results[2], ValueError)
+    assert isinstance(results[2].error, ValueError)
     assert str(results[2]) == "boom 2"
     assert results[3:] == [30, 40]
 
 
-def test_results_follow_the_error_mode():
-    spy = Spy(fail_at={1, 3})
-    raising = LazyBatch(range(5), spy, errors="raise")
-    with pytest.raises(ValueError, match="boom 1"):
-        raising.results()
-    # Everything ran despite the failures.
-    assert sorted(spy.calls) == [0, 1, 2, 3, 4]
-    assert len(raising.fetched) == 5
-
-    returning = LazyBatch(range(5), Spy(fail_at={1, 3}), errors="return")
-    results = returning.results()
-    assert results[0] == 0
-    assert isinstance(results[1], ValueError)
-    assert results[2] == 20
-    assert isinstance(results[3], ValueError)
-    assert results[4] == 40
-
-
 def test_getitem_follows_the_error_mode():
     with pytest.raises(ValueError, match="boom 0"):
-        LazyBatch([0], Spy(fail_at={0}))[0]
-    returned = LazyBatch([0], Spy(fail_at={0}), errors="return")[0]
-    assert isinstance(returned, ValueError)
-    assert isinstance(LazyBatch([0, 1], Spy(fail_at={0}), errors="return")[0:2][0], ValueError)
+        Batch([0], Spy(fail_at={0}))[0]
+    returned = Batch([0], Spy(fail_at={0}), errors="return")[0]
+    assert isinstance(returned.error, ValueError)
+    assert isinstance(Batch([0, 1], Spy(fail_at={0}), errors="return")[0:2][0].error, ValueError)
 
 
 def test_base_exceptions_are_not_swallowed():
@@ -430,12 +133,9 @@ def test_base_exceptions_are_not_swallowed():
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        LazyBatch([1], compute, errors="return")[0]
+        Batch([1], compute, errors="return")[0]
     with pytest.raises(KeyboardInterrupt):
-        list(LazyBatch([1, 2], compute, errors="return"))
-
-
-# -- export -----------------------------------------------------------------
+        list(Batch([1, 2], compute, errors="return"))
 
 
 class Row:
@@ -449,7 +149,7 @@ class Row:
 def test_to_df_follows_the_error_mode():
     pandas = pytest.importorskip("pandas")
 
-    batch = LazyBatch(range(3), Row, max_workers=2)
+    batch = Batch(range(3), Row, max_workers=2)
     frame = batch.to_df()
     assert isinstance(frame, pandas.DataFrame)
     assert list(frame.columns) == ["label", "score"]
@@ -461,15 +161,15 @@ def test_to_df_follows_the_error_mode():
         return Row(value)
 
     with pytest.raises(ValueError, match="boom"):
-        LazyBatch(range(3), failing).to_df()
+        Batch(range(3), failing).to_df()
 
-    frame = LazyBatch(range(3), failing, errors="return").to_df()
+    frame = Batch(range(3), failing, errors="return").to_df()
     assert len(frame) == 3
     assert list(frame.columns) == ["label", "score", "error"]
     assert frame["score"].tolist()[0] == 0
     assert frame["score"].tolist()[2] == 20
     assert pandas.isna(frame.loc[1, "score"])
-    assert isinstance(frame.loc[1, "error"], ValueError)
+    assert isinstance(frame.loc[1, "error"].error, ValueError)
     assert frame["error"].isna().tolist() == [True, False, True]
 
 
@@ -481,9 +181,9 @@ def test_to_df_labels_failed_rows_when_given_a_label_function():
             raise ValueError("boom")
         return Row(value)
 
-    frame = LazyBatch(range(3), failing, errors="return", label=lambda value: value).to_df()
+    frame = Batch(range(3), failing, errors="return", label=lambda value: value).to_df()
     assert frame["label"].tolist() == [0, 1, 2]
-    assert isinstance(frame.loc[1, "error"], ValueError)
+    assert isinstance(frame.loc[1, "error"].error, ValueError)
 
 
 def test_to_df_reports_pandas_missing():
@@ -494,4 +194,157 @@ def test_to_df_reports_pandas_missing():
     else:
         pytest.skip("pandas is installed")
     with pytest.raises(ImportError, match="pandas is required"):
-        LazyBatch(range(3), Row).to_df()
+        Batch(range(3), Row).to_df()
+
+
+def test_construction_completes_work_and_reads_do_not_repeat_it():
+    spy = Spy()
+    batch = Batch(range(4), spy, max_workers=2)
+    assert sorted(spy.calls) == [0, 1, 2, 3]
+    assert batch.inputs == [0, 1, 2, 3]
+    assert list(batch) == [0, 10, 20, 30]
+    assert batch[-1] == 30
+    assert batch[1:3] == [10, 20]
+    copy = batch.results()
+    copy.clear()
+    assert batch.results() == [0, 10, 20, 30]
+    assert len(spy.calls) == 4
+    assert repr(batch) == "<Batch results=4 max_workers=2>"
+
+
+def test_raise_mode_finishes_all_inputs_then_raises_first_error_in_input_order():
+    second_finished = threading.Event()
+    calls = []
+
+    def compute(value):
+        calls.append(value)
+        if value == 0:
+            assert second_finished.wait(TIMEOUT)
+            raise ValueError("first")
+        if value == 1:
+            second_finished.set()
+            raise ValueError("second")
+        return value
+
+    with pytest.raises(ValueError, match="first"):
+        Batch(range(3), compute, max_workers=2)
+    assert sorted(calls) == [0, 1, 2]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_consumes_inputs_only_as_execution_capacity_becomes_available(stream):
+    """A large iterable must not be exhausted before the first work completes."""
+    completed = [threading.Event() for _ in range(20)]
+
+    def inputs():
+        for index in range(len(completed)):
+            if index >= 3:
+                assert completed[index - 3].is_set(), "inputs consumed ahead of worker capacity"
+            yield index
+
+    def compute(index):
+        completed[index].set()
+        return index
+
+    factory = datamermaid.BatchStream if stream else Batch
+    assert list(factory(inputs(), compute, max_workers=3)) == list(range(20))
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_successful_none_is_not_confused_with_failure(stream):
+    factory = datamermaid.BatchStream if stream else Batch
+    assert list(factory([1, 2], lambda _: None)) == [None, None]
+
+
+def test_stream_raise_stops_consuming_more_inputs():
+    consumed = []
+    original = ValueError("stop")
+
+    def inputs():
+        for index in range(100):
+            consumed.append(index)
+            yield index
+
+    def compute(index):
+        raise original
+
+    with datamermaid.BatchStream(inputs(), compute, max_workers=1) as results:
+        with pytest.raises(ValueError) as raised:
+            next(results)
+        assert raised.value is original
+    assert consumed == [0]
+
+
+def test_stream_close_waits_for_running_work_without_scheduling_more():
+    started = threading.Event()
+    release = threading.Event()
+    closed = threading.Event()
+    calls = []
+
+    def compute(index):
+        calls.append(index)
+        if index == 0:
+            assert started.wait(TIMEOUT)
+        else:
+            started.set()
+            assert release.wait(TIMEOUT)
+        return index
+
+    results = datamermaid.BatchStream(range(100), compute, max_workers=2)
+    assert next(results) == 0
+
+    def close():
+        results.close()
+        closed.set()
+
+    closer = threading.Thread(target=close)
+    closer.start()
+    try:
+        assert not closed.wait(0.05)
+    finally:
+        release.set()
+        closer.join(TIMEOUT)
+    assert closed.is_set()
+    assert sorted(calls) == [0, 1]
+    assert list(results) == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_failing_input_iterator_drains_running_work(stream):
+    finished = threading.Event()
+    original = ValueError("source failed")
+
+    def inputs():
+        yield 1
+        raise original
+
+    def compute(index):
+        finished.set()
+        return index
+
+    factory = datamermaid.BatchStream if stream else Batch
+    with pytest.raises(ValueError) as raised:
+        list(factory(inputs(), compute, max_workers=2, errors="return"))
+    assert raised.value is original
+    assert finished.is_set()
+
+
+def test_stream_propagates_interrupts_and_closes():
+    def compute(index):
+        raise KeyboardInterrupt
+
+    with datamermaid.BatchStream(range(10), compute, max_workers=1) as results:
+        with pytest.raises(KeyboardInterrupt):
+            next(results)
+        assert list(results) == []
+
+
+@pytest.mark.parametrize("executor", [Batch, datamermaid.BatchStream])
+@pytest.mark.parametrize("workers", [True, False, 1.5, "2", None])
+def test_worker_type_is_rejected_without_consuming_input(executor, workers):
+    def inputs():
+        pytest.fail("invalid configuration must not consume input")
+        yield 1
+
+    with pytest.raises(TypeError, match="max_workers"):
+        executor(inputs(), lambda value: value, max_workers=workers)

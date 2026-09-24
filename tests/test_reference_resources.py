@@ -8,6 +8,7 @@ need credentials, so those two were written from the API's models instead.
 from __future__ import annotations
 
 import datetime
+from functools import cached_property
 
 import httpx
 import pytest
@@ -99,7 +100,7 @@ def test_the_registry_lists_every_reference_resource_on_the_client(client):
     exposed = {
         name: type(getattr(client, name))
         for name, attribute in vars(MermaidClient).items()
-        if isinstance(attribute, property)
+        if isinstance(attribute, (property, cached_property))
         and type(getattr(client, name)).__module__ == reference.__name__
     }
     assert exposed == dict(REFERENCE_RESOURCES)

@@ -287,7 +287,10 @@ Serranidae       12.9     61.3        48.4
     `frame.columns` on a one-row query before writing the analysis:
 
     ```python
-    print(project.benthicpits.sample_units(limit=1).to_df().columns.tolist())
+    from datamermaid.pagination import to_dataframe
+
+    rows = project.benthicpits.sample_units(limit=1)[:1]
+    print(to_dataframe(rows).columns.tolist())
     ```
 
 ## Which grain should I use?

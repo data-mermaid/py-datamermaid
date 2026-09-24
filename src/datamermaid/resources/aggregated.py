@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..models import AggregatedRecord
-from .base import Resource, project_path
+from .base import Resource, _normalize_id, project_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
@@ -104,26 +104,86 @@ class AggregatedFamilyResource(Resource[AggregatedRecord]):
         self, client: MermaidClient, project_id: str, family: AggregatedViewFamily
     ) -> None:
         super().__init__(client)
-        self.project_id = project_id
+        self.project_id = _normalize_id(project_id, name="project id")
         self.family = family
-        self.path = project_path(project_id, f"{family.family}/")
+        self.path = project_path(self.project_id, f"{family.family}/")
 
     def _view(self, sub_route: str, filters: dict[str, Any]) -> PaginatedList[AggregatedRecord]:
         return self._list(self._url(sub_route), params=filters)
 
-    def observations(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
+    def observations(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        sample_date_after: str | None = None,
+        sample_date_before: str | None = None,
+        site_id: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[AggregatedRecord]:
         """One row per observation, with its sample unit and site joined in."""
 
+        filters.update(
+            limit=limit,
+            offset=offset,
+            ordering=ordering,
+            fields=fields,
+            sample_date_after=sample_date_after,
+            sample_date_before=sample_date_before,
+            site_id=site_id,
+        )
         return self._view(self.family.observations, filters)
 
-    def sample_units(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
+    def sample_units(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        sample_date_after: str | None = None,
+        sample_date_before: str | None = None,
+        site_id: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[AggregatedRecord]:
         """One row per sample unit, with the protocol's per-unit aggregates."""
 
+        filters.update(
+            limit=limit,
+            offset=offset,
+            ordering=ordering,
+            fields=fields,
+            sample_date_after=sample_date_after,
+            sample_date_before=sample_date_before,
+            site_id=site_id,
+        )
         return self._view(self.family.sample_units, filters)
 
-    def sample_events(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
+    def sample_events(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        sample_date_after: str | None = None,
+        sample_date_before: str | None = None,
+        site_id: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[AggregatedRecord]:
         """One row per sample event, averaged over the event's sample units."""
 
+        filters.update(
+            limit=limit,
+            offset=offset,
+            ordering=ordering,
+            fields=fields,
+            sample_date_after=sample_date_after,
+            sample_date_before=sample_date_before,
+            site_id=site_id,
+        )
         return self._view(self.family.sample_events, filters)
 
 
@@ -136,21 +196,81 @@ class BleachingQCFamilyResource(AggregatedFamilyResource):
     answers the same three methods as its siblings.
     """
 
-    def colonies_bleached(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
+    def colonies_bleached(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        sample_date_after: str | None = None,
+        sample_date_before: str | None = None,
+        site_id: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[AggregatedRecord]:
         """One row per bleached colony count (``obscoloniesbleacheds/``)."""
 
+        filters.update(
+            limit=limit,
+            offset=offset,
+            ordering=ordering,
+            fields=fields,
+            sample_date_after=sample_date_after,
+            sample_date_before=sample_date_before,
+            site_id=site_id,
+        )
         return self._view(self.family.observations, filters)
 
-    def quadrat_benthic_percent(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
+    def quadrat_benthic_percent(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        sample_date_after: str | None = None,
+        sample_date_before: str | None = None,
+        site_id: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[AggregatedRecord]:
         """One row per quadrat's benthic percent cover (``obsquadratbenthicpercents/``)."""
 
+        filters.update(
+            limit=limit,
+            offset=offset,
+            ordering=ordering,
+            fields=fields,
+            sample_date_after=sample_date_after,
+            sample_date_before=sample_date_before,
+            site_id=site_id,
+        )
         return self._view(self.family.views["quadrat_benthic_percent"], filters)
 
-    def observations(self, **filters: Any) -> PaginatedList[AggregatedRecord]:
+    def observations(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        sample_date_after: str | None = None,
+        sample_date_before: str | None = None,
+        site_id: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[AggregatedRecord]:
         """The colonies bleached view; see
         [`colonies_bleached`][..colonies_bleached].
         """
 
+        filters.update(
+            limit=limit,
+            offset=offset,
+            ordering=ordering,
+            fields=fields,
+            sample_date_after=sample_date_after,
+            sample_date_before=sample_date_before,
+            site_id=site_id,
+        )
         return self.colonies_bleached(**filters)
 
 

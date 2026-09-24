@@ -276,7 +276,7 @@ with MermaidClient() as client:  # the service is public, no credentials needed
 The area of interest can be a GeoJSON mapping, anything with a
 `__geo_interface__` (a shapely geometry, a GeoDataFrame row), a `(lon, lat)`
 tuple or a `Site`, and `to_aoi` is exported if you want to normalise one
-yourself. `batch()` runs one request per area on a thread pool, lazily, so a
+yourself. `batch()` runs one request per area on a bounded thread pool, so a
 whole project becomes one table:
 
 ```python
@@ -294,14 +294,35 @@ with MermaidClient() as client:
     depth = batch.to_df()  # one wide row per site: label, source, band_1_mean, ...
 ```
 
-The sites are fetched when `batch(...)` is called, but no statistics request is
-sent until the batch is iterated, indexed or exported. The workers share the
+The sites and statistics are fetched during `batch(...)`, which returns completed
+results in input order. The workers share the
 client's rate-limit backoff, and `errors="return"` keeps a partly failing batch
 usable. See the
 [zonal statistics guide](https://data-mermaid.github.io/py-datamermaid/zonal_stats/)
 for the STAC routes, the weighting methods and the long-form export.
 
-### Pagination
+For large STAC searches, prepare the site–item workload and stream results:
+
+```python
+job = client.zonal_stats.raster_stac.prepare(
+    sites,
+    search=search,
+    asset="temperature",
+    stats=["mean"],
+    radius=500,
+)
+print(job.request_count)
+with job.run(stream=True, max_workers=8) as results:
+    for result in results:
+        print(result.label, result.stac, result["band_1"]["mean"])
+```
+
+Preparation retains sites and sources, while streaming generates pairs lazily
+and bounds pending requests. Keep the client open while consuming results.
+The [large jobs guide](https://data-mermaid.github.io/py-datamermaid/zonal_stats/#stac-searches-and-large-jobs)
+shows incremental JSONL output and failure handling.
+
+## Pagination
 
 `client.projects.list()` returns a `PaginatedList`. It issues no request until
 you use it, then fetches one page at a time and caches what it has seen:
@@ -318,6 +339,16 @@ for project in projects:
 
 Any keyword argument is passed through as a query parameter, e.g.
 `client.projects.list(showall=True, limit=100)`.
+
+
+`limit` controls records per page, not the total returned. Iteration and `to_df()`
+follow every page. For a bounded preview, slice first:
+
+```python
+from datamermaid.pagination import to_dataframe
+
+preview = to_dataframe(client.projects.list(limit=5)[:5])
+```
 
 ### DataFrames
 
@@ -345,7 +376,8 @@ host, so it has its own setting and is sent no credentials.
 
 ### Errors
 
-All errors derive from `MermaidError`:
+Request and authentication errors derive from `MermaidError`. Invalid arguments
+raise `TypeError` or `ValueError`; missing optional dependencies raise `ImportError`:
 
 | Status | Exception |
 | --- | --- |
@@ -547,7 +579,7 @@ The source is in `src/datamermaid/`:
 - `models.py`: frozen dataclasses. `APIModel.from_api()` fills the declared
   fields and keeps everything else in `extra`. `ZonalStatsResult` is here too.
 - `pagination.py`: `PaginatedList`, a lazy, caching view over list responses.
-- `batch.py`: `LazyBatch`, lazy and parallel results of one computation per
+- `batch.py`: `Batch`, completed parallel results of one computation per
   input, used by the zonal stats `batch()` methods.
 - `geometry.py`: `to_aoi`, which normalises an area of interest to GeoJSON.
 - `resources/`: one module per endpoint group. `zonal_stats.py` holds the four

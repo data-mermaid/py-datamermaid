@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import math
 import os
 import platform
 import random
 import threading
 import time
+from functools import cached_property
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import httpx
 
@@ -18,7 +20,6 @@ from .exceptions import MermaidConnectionError, parse_retry_after, raise_for_sta
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .models import Me
-    from .resources.base import BaseResource
     from .resources.projects import ProjectsResource
     from .resources.reference import (
         BenthicAttributesResource,
@@ -34,7 +35,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         SitesResource,
         SummarySampleEventsResource,
     )
-    from .resources.zonal_stats import ZonalStatsResource
+    from .resources.zonal_stats import ZonalStats
 
 __all__ = [
     "BASE_URL_ENV_VAR",
@@ -51,9 +52,6 @@ BASE_URL_ENV_VAR = "MERMAID_API_URL"
 
 DEFAULT_ZONAL_STATS_URL = "https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/"
 ZONAL_STATS_URL_ENV_VAR = "MERMAID_ZONAL_STATS_URL"
-
-#: A resource wrapper cached on the client, for `MermaidClient._resource`.
-R = TypeVar("R", bound="BaseResource")
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
@@ -114,7 +112,7 @@ class MermaidClient:
     Use it as a context manager so the connection pool is closed.
 
     The client is safe to share between threads, which is how a
-    [`LazyBatch`][datamermaid.batch.LazyBatch] fans requests out.  Throttling is
+    [`Batch`][datamermaid.batch.Batch] fans requests out.  Throttling is
     cooperative: a ``429`` seen on any thread sets a client-wide deadline
     (``Retry-After``, or the computed backoff, capped at 30 seconds) that every
     request waits on before it is sent, so the workers back off together instead
@@ -187,8 +185,15 @@ class MermaidClient:
         user_agent: str | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int):
+            raise TypeError("max_retries must be an integer")
         if max_retries < 0:
             raise ValueError("max_retries must be >= 0")
+
+        if isinstance(backoff_factor, bool) or not isinstance(backoff_factor, (int, float)):
+            raise TypeError("backoff_factor must be a number")
+        if not math.isfinite(backoff_factor) or backoff_factor < 0:
+            raise ValueError("backoff_factor must be finite and >= 0")
 
         self.auth = resolve_auth(auth, api_key)
         self.base_url = resolve_base_url(base_url)
@@ -211,7 +216,6 @@ class MermaidClient:
             follow_redirects=True,
             transport=transport,
         )
-        self._resources: dict[type[Any], Any] = {}
         # Cooperative throttle: a `time.monotonic()` deadline before which no
         # request may be sent, shared by every thread using this client.
         self._throttle_lock = threading.Lock()
@@ -240,23 +244,14 @@ class MermaidClient:
 
     # -- resources --------------------------------------------------------
 
-    def _resource(self, resource_class: type[R]) -> R:
-        """Return the client's single instance of ``resource_class``."""
-
-        resource = self._resources.get(resource_class)
-        if resource is None:
-            resource = resource_class(self)
-            self._resources[resource_class] = resource
-        return cast("R", resource)
-
     def me(self) -> Me:
         """Return the profile that owns the credentials in use (``GET /me/``)."""
 
         from .resources.me import MeResource
 
-        return self._resource(MeResource).get()
+        return MeResource(self).get()
 
-    @property
+    @cached_property
     def projects(self) -> ProjectsResource:
         """Access to the ``/projects/`` endpoints.
 
@@ -266,115 +261,115 @@ class MermaidClient:
 
         from .resources.projects import ProjectsResource
 
-        return self._resource(ProjectsResource)
+        return ProjectsResource(self)
 
-    @property
+    @cached_property
     def sites(self) -> SitesResource:
         """Reef sites, ``/sites/`` (requires authentication)."""
 
         from .resources.reference import SitesResource
 
-        return self._resource(SitesResource)
+        return SitesResource(self)
 
-    @property
+    @cached_property
     def managements(self) -> ManagementsResource:
         """Management regimes, ``/managements/`` (requires authentication)."""
 
         from .resources.reference import ManagementsResource
 
-        return self._resource(ManagementsResource)
+        return ManagementsResource(self)
 
-    @property
+    @cached_property
     def project_tags(self) -> ProjectTagsResource:
         """Organisation tags, ``/projecttags/``."""
 
         from .resources.reference import ProjectTagsResource
 
-        return self._resource(ProjectTagsResource)
+        return ProjectTagsResource(self)
 
-    @property
+    @cached_property
     def fish_sizes(self) -> FishSizesResource:
         """Fish size bins, ``/fishsizes/``."""
 
         from .resources.reference import FishSizesResource
 
-        return self._resource(FishSizesResource)
+        return FishSizesResource(self)
 
-    @property
+    @cached_property
     def fish_families(self) -> FishFamiliesResource:
         """Fish families, ``/fishfamilies/``."""
 
         from .resources.reference import FishFamiliesResource
 
-        return self._resource(FishFamiliesResource)
+        return FishFamiliesResource(self)
 
-    @property
+    @cached_property
     def fish_genera(self) -> FishGeneraResource:
         """Fish genera, ``/fishgenera/``."""
 
         from .resources.reference import FishGeneraResource
 
-        return self._resource(FishGeneraResource)
+        return FishGeneraResource(self)
 
-    @property
+    @cached_property
     def fish_species(self) -> FishSpeciesResource:
         """Fish species, ``/fishspecies/``."""
 
         from .resources.reference import FishSpeciesResource
 
-        return self._resource(FishSpeciesResource)
+        return FishSpeciesResource(self)
 
-    @property
+    @cached_property
     def benthic_attributes(self) -> BenthicAttributesResource:
         """Benthic attributes, ``/benthicattributes/``."""
 
         from .resources.reference import BenthicAttributesResource
 
-        return self._resource(BenthicAttributesResource)
+        return BenthicAttributesResource(self)
 
-    @property
+    @cached_property
     def invert_attributes(self) -> InvertAttributesResource:
         """Macroinvertebrate attributes, ``/invertattributes/``."""
 
         from .resources.reference import InvertAttributesResource
 
-        return self._resource(InvertAttributesResource)
+        return InvertAttributesResource(self)
 
-    @property
+    @cached_property
     def invert_species(self) -> InvertSpeciesResource:
         """Macroinvertebrate species, ``/invertspecies/``."""
 
         from .resources.reference import InvertSpeciesResource
 
-        return self._resource(InvertSpeciesResource)
+        return InvertSpeciesResource(self)
 
-    @property
+    @cached_property
     def summary_sample_events(self) -> SummarySampleEventsResource:
         """Public sample event summaries, ``/summarysampleevents/``."""
 
         from .resources.reference import SummarySampleEventsResource
 
-        return self._resource(SummarySampleEventsResource)
+        return SummarySampleEventsResource(self)
 
-    @property
+    @cached_property
     def label_mappings(self) -> LabelMappingsResource:
         """Classifier label mappings, ``/classification/labelmappings/``."""
 
         from .resources.reference import LabelMappingsResource
 
-        return self._resource(LabelMappingsResource)
+        return LabelMappingsResource(self)
 
-    @property
-    def zonal_stats(self) -> ZonalStatsResource:
+    @cached_property
+    def zonal_stats(self) -> ZonalStats:
         """The Zonal Stats service, a separate public host (``client.zonal_stats.raster``).
 
         Requests to it carry no MERMAID credentials.  See
-        [`ZonalStatsResource`][datamermaid.resources.zonal_stats.ZonalStatsResource].
+        [`ZonalStats`][datamermaid.resources.zonal_stats.ZonalStats].
         """
 
-        from .resources.zonal_stats import ZonalStatsResource
+        from .resources.zonal_stats import ZonalStats
 
-        return self._resource(ZonalStatsResource)
+        return ZonalStats(self)
 
     @overload
     def choices(self) -> dict[str, list[dict[str, Any]]]: ...
@@ -407,7 +402,7 @@ class MermaidClient:
 
         from .resources.choices import ChoicesResource
 
-        resource = self._resource(ChoicesResource)
+        resource = ChoicesResource(self)
         if name is None:
             return resource.fetch()
         return resource.get(name)

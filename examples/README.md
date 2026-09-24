@@ -40,6 +40,7 @@ set them instead of raising.
 | [`reference_data.py`](reference_data.py) | Public fish and benthic taxonomies as DataFrames, joined to the `/choices/` vocabularies | `uv run examples/reference_data.py` |
 | [`project_data.py`](project_data.py) | One project's sites, sample events and fish belt observations as DataFrames | `uv run examples/project_data.py --project-id <uuid>` |
 | [`zonal_stats.py`](zonal_stats.py) | Raster statistics around every site of one project, batched in parallel | `uv run examples/zonal_stats.py --url <cog-url>` |
+| [`zonal_stats_sst.py`](zonal_stats_sst.py) | Daily CoralTemp means around project sites, streamed to JSONL | `uv run examples/zonal_stats_sst.py --project-id <uuid>` |
 
 `project_data.py` takes `--project-id` (defaulting to `$MERMAID_PROJECT_ID`, and
 otherwise to the first project the credentials can see), `--limit` and
@@ -86,3 +87,27 @@ notebook self-serving.
   exercise the working tree rather than a published release.
 - `tests/test_examples.py` compiles every example and checks its metadata, so
   none of this can rot unnoticed; it makes no network calls.
+
+## Sea surface temperature and sites
+
+```bash
+uv run examples/zonal_stats_sst.py --project-id <uuid> \
+  --datetime 2024-01-01/2024-01-03 --limit 5 --max-items 3 \
+  --output sst-results.jsonl
+```
+
+The example searches the [MERMAID STAC catalog](https://mermaid.prescient.earth/stac)
+for NOAA CoralTemp (`daily_sst`, asset `data`), prepares one mean calculation
+per site and day, and streams success and failure rows to JSONL. It defaults to
+five sites, three daily items, a 500 m radius, and four workers. Use `--stac-url`
+to override the catalog URL; `--project-id` defaults to `$MERMAID_PROJECT_ID`,
+then the first visible project. The STAC catalog and statistics service are
+public; project sites require credentials.
+
+Rows include the site ID and name, STAC item/date, source URL, and
+`sst_mean_celsius` (or an `error`). The service applies the raster scale factor;
+do not multiply the mean by 0.01 again. CoralTemp is a roughly 5 km grid, so a
+500 m buffer does not imply 500 m source resolution. This is a spatial mean for
+each daily item, not an average across dates. Land or nodata pixels can produce
+no valid mean. The output file is overwritten on a new run; incremental writes
+preserve completed rows if interrupted, but there is no automatic resume.

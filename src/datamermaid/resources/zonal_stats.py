@@ -52,8 +52,8 @@ site = client.projects(project_id).sites.get(site_id)
 result = client.zonal_stats.raster.stats(site, url="https://example.test/depth.tif", radius=500)
 ```
 
-Many areas of interest go through ``batch``, which answers with a lazy
-[`LazyBatch`][datamermaid.batch.LazyBatch] that issues one request per AOI on a
+Many areas of interest go through ``batch``, which returns a completed
+[`Batch`][datamermaid.batch.Batch] that issues one request per AOI on a
 bounded thread pool and labels each result so ``to_df()`` gives one row per AOI:
 
 ```python
@@ -69,34 +69,41 @@ backoff and error mapping are the client's own.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import replace
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypeVar, cast
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, overload
 
-from ..batch import DEFAULT_MAX_WORKERS, LazyBatch
+from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream, _validate_execution
 from ..exceptions import MermaidConnectionError
-from ..geometry import GeometryLike, to_aoi
+from ..geometry import GeometryLike, _validate_radius, to_aoi
 from ..models import Site, ZonalStatsResult
 from .base import BaseResource
+from .zonal_job import (
+    SourceInput,
+    StacSearchLike,
+    ZonalJob,
+    ZonalSource,
+    ZonalTask,
+    resolve_sources,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
 
 __all__ = [
     "ZONAL_STATS_ENDPOINTS",
+    "BaseZonalStats",
     "BatchItem",
-    "RasterStacStatsEndpoint",
-    "RasterStatsEndpoint",
+    "RasterStacStats",
+    "RasterStats",
     "Stat",
-    "VectorStacStatsEndpoint",
-    "VectorStatsEndpoint",
+    "VectorStacStats",
+    "VectorStats",
     "WeightingMethod",
-    "ZonalStatsEndpoint",
-    "ZonalStatsResource",
+    "ZonalStats",
 ]
-
-#: An endpoint wrapper cached on the resource, for `ZonalStatsResource._endpoint`.
-E = TypeVar("E", bound="ZonalStatsEndpoint")
 
 
 class Stat(str, Enum):
@@ -207,7 +214,7 @@ def _bands(bands: Sequence[int] | None) -> list[int] | None:
 
 
 class BatchItem(NamedTuple):
-    """One area of interest of a batch, with the label its result will carry."""
+    """Legacy input tuple; current zonal batches expose ZonalTask inputs."""
 
     aoi: Any
     label: Any
@@ -257,12 +264,12 @@ def _resolve_labels(aois: Sequence[Any], labels: Iterable[Any] | None) -> list[A
 
 
 def _check_url(url: Any) -> str:
-    if not isinstance(url, str) or not url:
+    if not isinstance(url, str) or not url.strip():
         raise ValueError("url must be a non-empty string")
     return url
 
 
-class ZonalStatsEndpoint:
+class BaseZonalStats:
     """One route of the Zonal Stats service.
 
     Subclasses set [`route`][.route] (the segment after ``.../zonal-stats/``) and
@@ -273,7 +280,7 @@ class ZonalStatsEndpoint:
     #: Route segment under the service root, e.g. ``"raster"``.
     route: ClassVar[str]
 
-    def __init__(self, resource: ZonalStatsResource) -> None:
+    def __init__(self, resource: ZonalStats) -> None:
         self._resource = resource
         self._client = resource._client
 
@@ -286,25 +293,30 @@ class ZonalStatsEndpoint:
 
         return f"{self._resource.path}{self.route}"
 
-    def _body(
-        self,
-        aoi: GeometryLike,
-        *,
-        url: str,
-        stats: Iterable[Stat | str] | None,
-        radius: float | None,
-        **options: Any,
-    ) -> dict[str, Any]:
-        """Compose the request body, leaving out every option that is ``None``."""
+    def _options(self, **options: Any) -> dict[str, Any]:
+        """Validate route options once; generic endpoints accept arbitrary fields."""
+        return options
 
-        body: dict[str, Any] = {"aoi": to_aoi(aoi, radius=radius), "url": _check_url(url)}
-        names = _stats(stats)
+    def _bind_source(
+        self,
+        source: ZonalSource,
+        names: list[str] | None,
+        radius: float | None,
+        options: dict[str, Any],
+    ) -> Callable[[ZonalTask], ZonalStatsResult]:
+        """Bind a resolved source to its request target and prepared body template."""
+        template = {key: value for key, value in options.items() if value is not None}
+        template["url"] = source.url
         if names is not None:
-            body["stats"] = names
-        for key, value in options.items():
-            if value is not None:
-                body[key] = value
-        return body
+            template["stats"] = names
+        post = self._post
+
+        def compute(task: ZonalTask) -> ZonalStatsResult:
+            body = {**template, "aoi": to_aoi(task.aoi, radius=radius)}
+            result = post(body, label=task.label)
+            return replace(result, stac=source.stac) if source.stac is not None else result
+
+        return compute
 
     def _post(self, body: dict[str, Any], *, label: Any) -> ZonalStatsResult:
         # The service is public and lives on another host, so `public=True`
@@ -329,10 +341,73 @@ class ZonalStatsEndpoint:
         radius: float | None,
         **options: Any,
     ) -> ZonalStatsResult:
-        """One statistics request: the single seam ``stats`` and ``batch`` both go through."""
+        """Validate and execute a single statistics request."""
 
-        body = self._body(aoi, url=url, stats=stats, radius=radius, **options)
-        return self._post(body, label=label)
+        radius = _validate_radius(radius)
+        validated = self._options(**options)
+        source = ZonalSource(_check_url(url))
+        compute = self._bind_source(source, _stats(stats), radius, validated)
+        return compute(ZonalTask(aoi, label, source))
+
+    def prepare(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        labels: Iterable[Any] | None = None,
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> ZonalJob:
+        """Resolve sources and count pairs without submitting statistics requests.
+
+        Supply exactly one of url, sources (URLs or STAC Items), or a
+        pystac-client ItemSearch via search. Item assets resolve to data URLs;
+        string URLs retain this endpoint's usual meaning. AOIs and sources are
+        retained, but their Cartesian product is generated lazily at execution.
+        """
+        return self._prepare(
+            aois,
+            url=url,
+            sources=sources,
+            search=search,
+            labels=labels,
+            stats=stats,
+            radius=radius,
+            **options,
+        )
+
+    def _prepare(
+        self,
+        aois: Any,
+        *,
+        url: str | None,
+        sources: Iterable[SourceInput] | None,
+        search: StacSearchLike | None,
+        labels: Iterable[Any] | None,
+        stats: Iterable[Stat | str] | None,
+        radius: float | None,
+        **options: Any,
+    ) -> ZonalJob:
+        """Validate options and bind every source before constructing the job."""
+        radius = _validate_radius(radius)
+        options = self._options(**options)
+        names = _stats(stats)
+        expanded = _expand_aois(aois)
+        resolved_labels = _resolve_labels(expanded, labels)
+        resolved_sources = resolve_sources(url, sources, search, options.get("asset"))
+        # Identity keys preserve distinct items even when their asset URLs match.
+        requests = {
+            id(source): self._bind_source(source, names, radius, options)
+            for source in resolved_sources
+        }
+
+        def compute(task: ZonalTask) -> ZonalStatsResult:
+            return requests[id(task.source)](task)
+
+        return ZonalJob(expanded, resolved_labels, resolved_sources, compute)
 
     def _batch(
         self,
@@ -341,36 +416,36 @@ class ZonalStatsEndpoint:
         labels: Iterable[Any] | None,
         max_workers: int,
         errors: Literal["raise", "return"],
-        url: str,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
         stats: Iterable[Stat | str] | None,
         radius: float | None,
         **options: Any,
-    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
-        """Build the lazy batch behind ``batch``: expand the AOIs, fix the labels, defer the rest.
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ):
+        """Expand the AOIs, assign labels, and execute all requests.
 
         The URL, the statistic names and the labels are checked here, before
         anything runs; each AOI is validated when its own request is composed,
         so a bad one fails at its position without spoiling the others.
         """
 
-        _check_url(url)
-        names = _stats(stats)
-        expanded = _expand_aois(aois)
-        resolved = _resolve_labels(expanded, labels)
-        items = [BatchItem(aoi, label) for aoi, label in zip(expanded, resolved, strict=True)]
-
-        def compute(item: BatchItem) -> ZonalStatsResult:
-            return self._request(
-                item.aoi, label=item.label, url=url, stats=names, radius=radius, **options
-            )
-
-        return LazyBatch(
-            items,
-            compute,
-            max_workers=max_workers,
-            errors=errors,
-            label=lambda item: item.label,
+        _validate_execution(max_workers, errors)
+        job = self._prepare(
+            aois,
+            url=url,
+            sources=sources,
+            search=search,
+            labels=labels,
+            stats=stats,
+            radius=radius,
+            **options,
         )
+        return job.run(max_workers=max_workers, errors=errors, stream=stream)
 
     def stats(
         self,
@@ -408,38 +483,153 @@ class ZonalStatsEndpoint:
 
         return self._request(aoi, label=label, url=url, stats=stats, radius=radius, **options)
 
+    @overload
     def batch(
         self,
         aois: Any,
         *,
-        url: str,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
         **options: Any,
-    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
-        """One statistics request per area of interest, run lazily on a thread pool.
+    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
 
-        No statistics request is sent until the batch is iterated, indexed or
-        materialised; see [`LazyBatch`][datamermaid.batch.LazyBatch].  ``aois``
-        itself is read in full here, so a lazy list such as ``sites.list()``
-        fetches all its pages at this call.  Each result carries a
-        ``label``, so ``batch.to_df()`` is one wide row per AOI.
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ): ...
+
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        **options: Any,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ):
+        """One statistics request per area of interest, run on a bounded thread pool.
+
+        By default this call waits for all requests and returns a completed
+        [`Batch`][datamermaid.batch.Batch] in input order. ``aois`` is read in
+        full, so a lazy list such as ``sites.list()`` fetches all its pages.
+        Each result carries a ``label``, so ``batch.to_df()`` is one row per AOI.
 
         Args:
             aois: An iterable of areas of interest (anything
                 [`stats`][..stats] accepts), or one object whose
                 ``__geo_interface__`` is a ``FeatureCollection``, such as a
                 GeoDataFrame, which expands into its features.
-            url: The data source the route reads.
+            url: The data source the route reads; exclusive with sources/search.
+            sources: Iterable of source URLs or STAC Items.
+            search: A pystac-client ItemSearch, resolved once before execution.
+            stream: Return a single-pass BatchStream instead of retaining results.
+                Use as a context manager and keep the client open while iterating.
             labels: One label per AOI, in order.  Omitted, a
                 [`Site`][datamermaid.models.Site] is labelled by its ``id``, a
                 ``Feature`` by its ``id``, and anything else by its position.
             max_workers: Most requests in flight at once.
-            errors: ``"raise"`` re-raises a failed request's exception at its
-                position; ``"return"`` yields the exception object instead.
+            errors: ``"raise"`` raises the first error in input order after all
+                requests finish; ``"return"`` retains BatchFailure objects with the
+                input task and original exception.
             stats: Statistic names, as for [`stats`][..stats].
             radius: Buffer around a ``Point``, in metres.
             **options: Route-specific body fields; a ``None`` value is left out.
@@ -456,6 +646,9 @@ class ZonalStatsEndpoint:
             max_workers=max_workers,
             errors=errors,
             url=url,
+            sources=sources,
+            search=search,
+            stream=stream,
             stats=stats,
             radius=radius,
             **options,
@@ -467,13 +660,48 @@ class ZonalStatsEndpoint:
         return self.stats(aoi, url=url, **kwargs)
 
 
-class RasterStatsEndpoint(ZonalStatsEndpoint):
+class RasterStats(BaseZonalStats):
     """``POST .../zonal-stats/raster``: statistics from a Cloud Optimized GeoTIFF."""
 
     route = "raster"
 
+    def _options(  # type: ignore[override]
+        self,
+        *,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> dict[str, Any]:
+        return {"bands": _bands(bands), "approx_stats": approx_stats}
+
     # The base signature takes ``**options`` so any route can be described; this
     # one names the raster options instead, which mypy reads as a narrowing.
+
+    def prepare(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        labels: Iterable[Any] | None = None,
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> ZonalJob:
+        """Prepare source calculations using the same options as stats() and batch()."""
+        return self._prepare(
+            aois,
+            labels=labels,
+            url=url,
+            sources=sources,
+            search=search,
+            stats=stats,
+            radius=radius,
+            bands=bands,
+            approx_stats=approx_stats,
+        )
+
     def stats(  # type: ignore[override]
         self,
         aoi: GeometryLike,
@@ -512,15 +740,73 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
             url=url,
             stats=stats,
             radius=radius,
-            bands=_bands(bands),
+            bands=bands,
             approx_stats=approx_stats,
         )
 
-    def batch(  # type: ignore[override]
+    @overload  # type: ignore[override]
+    def batch(
         self,
         aois: Any,
         *,
-        url: str,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
@@ -528,11 +814,70 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
         radius: float | None = None,
         bands: Sequence[int] | None = None,
         approx_stats: bool = False,
-    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
-        """One raster statistics request per area of interest, run lazily in parallel.
+    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ): ...
+
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ):
+        """One raster statistics request per area of interest, run in parallel.
 
         Takes the same options as [`stats`][..stats]; see
-        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
         for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
         options are validated before any request is made.
 
@@ -552,17 +897,63 @@ class RasterStatsEndpoint(ZonalStatsEndpoint):
             max_workers=max_workers,
             errors=errors,
             url=url,
+            sources=sources,
+            search=search,
+            stream=stream,
             stats=stats,
             radius=radius,
-            bands=_bands(bands),
+            bands=bands,
             approx_stats=approx_stats,
         )
 
 
-class RasterStacStatsEndpoint(ZonalStatsEndpoint):
+class RasterStacStats(RasterStats):
     """``POST .../zonal-stats/raster/stac``: statistics from a raster asset of a STAC Item."""
 
     route = "raster/stac"
+
+    def _options(self, *, asset: str | None = None, **options: Any) -> dict[str, Any]:
+        return {**super()._options(**options), "asset": _asset(asset)}
+
+    def _bind_source(
+        self,
+        source: ZonalSource,
+        names: list[str] | None,
+        radius: float | None,
+        options: dict[str, Any],
+    ) -> Callable[[ZonalTask], ZonalStatsResult]:
+        if source.stac is not None:
+            options = {key: value for key, value in options.items() if key != "asset"}
+            return self._resource.raster._bind_source(source, names, radius, options)
+        return super()._bind_source(source, names, radius, options)
+
+    def prepare(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        labels: Iterable[Any] | None = None,
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> ZonalJob:
+        """Prepare source calculations using the same options as stats() and batch()."""
+        return self._prepare(
+            aois,
+            labels=labels,
+            url=url,
+            sources=sources,
+            search=search,
+            stats=stats,
+            radius=radius,
+            asset=asset,
+            bands=bands,
+            approx_stats=approx_stats,
+        )
 
     def stats(  # type: ignore[override]
         self,
@@ -601,16 +992,77 @@ class RasterStacStatsEndpoint(ZonalStatsEndpoint):
             url=url,
             stats=stats,
             radius=radius,
-            asset=_asset(asset),
-            bands=_bands(bands),
+            asset=asset,
+            bands=bands,
             approx_stats=approx_stats,
         )
 
-    def batch(  # type: ignore[override]
+    @overload  # type: ignore[override]
+    def batch(
         self,
         aois: Any,
         *,
-        url: str,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
@@ -619,11 +1071,73 @@ class RasterStacStatsEndpoint(ZonalStatsEndpoint):
         asset: str | None = None,
         bands: Sequence[int] | None = None,
         approx_stats: bool = False,
-    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
-        """One STAC raster statistics request per area of interest, run lazily in parallel.
+    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ): ...
+
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        bands: Sequence[int] | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ):
+        """One STAC raster statistics request per area of interest, run in parallel.
 
         Takes the same options as [`stats`][..stats]; see
-        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
         for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
         options are validated before any request is made.
         """
@@ -634,15 +1148,18 @@ class RasterStacStatsEndpoint(ZonalStatsEndpoint):
             max_workers=max_workers,
             errors=errors,
             url=url,
+            sources=sources,
+            search=search,
+            stream=stream,
             stats=stats,
             radius=radius,
-            asset=_asset(asset),
-            bands=_bands(bands),
+            asset=asset,
+            bands=bands,
             approx_stats=approx_stats,
         )
 
 
-class VectorStatsEndpoint(ZonalStatsEndpoint):
+class VectorStats(BaseZonalStats):
     """``POST .../zonal-stats/vector``: area-weighted statistics from a GeoParquet file.
 
     ``columns`` names the numeric columns to summarise and is required; the
@@ -650,6 +1167,51 @@ class VectorStatsEndpoint(ZonalStatsEndpoint):
     """
 
     route = "vector"
+
+    def _options(  # type: ignore[override]
+        self,
+        *,
+        columns: Sequence[str],
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "columns": _columns(columns),
+            "geometry_column": _geometry_column(geometry_column),
+            "weighting_method": _weighting_method(weighting_method),
+            "approx_stats": approx_stats,
+        }
+
+    def prepare(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> ZonalJob:
+        """Prepare source calculations using the same options as stats() and batch()."""
+        return self._prepare(
+            aois,
+            labels=labels,
+            url=url,
+            sources=sources,
+            search=search,
+            stats=stats,
+            radius=radius,
+            columns=columns,
+            geometry_column=geometry_column,
+            weighting_method=weighting_method,
+            approx_stats=approx_stats,
+        )
 
     def stats(  # type: ignore[override]
         self,
@@ -696,17 +1258,81 @@ class VectorStatsEndpoint(ZonalStatsEndpoint):
             url=url,
             stats=stats,
             radius=radius,
-            columns=_columns(columns),
-            geometry_column=_geometry_column(geometry_column),
-            weighting_method=_weighting_method(weighting_method),
+            columns=columns,
+            geometry_column=geometry_column,
+            weighting_method=weighting_method,
             approx_stats=approx_stats,
         )
 
-    def batch(  # type: ignore[override]
+    @overload  # type: ignore[override]
+    def batch(
         self,
         aois: Any,
         *,
-        url: str,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
@@ -716,11 +1342,76 @@ class VectorStatsEndpoint(ZonalStatsEndpoint):
         geometry_column: str | None = None,
         weighting_method: WeightingMethod | str | None = None,
         approx_stats: bool = False,
-    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
-        """One vector statistics request per area of interest, run lazily in parallel.
+    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ): ...
+
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ):
+        """One vector statistics request per area of interest, run in parallel.
 
         Takes the same options as [`stats`][..stats]; see
-        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
         for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
         options are validated before any request is made.
         """
@@ -731,16 +1422,19 @@ class VectorStatsEndpoint(ZonalStatsEndpoint):
             max_workers=max_workers,
             errors=errors,
             url=url,
+            sources=sources,
+            search=search,
+            stream=stream,
             stats=stats,
             radius=radius,
-            columns=_columns(columns),
-            geometry_column=_geometry_column(geometry_column),
-            weighting_method=_weighting_method(weighting_method),
+            columns=columns,
+            geometry_column=geometry_column,
+            weighting_method=weighting_method,
             approx_stats=approx_stats,
         )
 
 
-class VectorStacStatsEndpoint(VectorStatsEndpoint):
+class VectorStacStats(VectorStats):
     """``POST .../zonal-stats/vector/stac``: statistics from a GeoParquet asset of a STAC Item.
 
     The vector route's options plus ``asset``, the key of the GeoParquet asset
@@ -748,6 +1442,55 @@ class VectorStacStatsEndpoint(VectorStatsEndpoint):
     """
 
     route = "vector/stac"
+
+    def _options(self, *, asset: str | None = None, **options: Any) -> dict[str, Any]:
+        return {**super()._options(**options), "asset": _asset(asset)}
+
+    def _bind_source(
+        self,
+        source: ZonalSource,
+        names: list[str] | None,
+        radius: float | None,
+        options: dict[str, Any],
+    ) -> Callable[[ZonalTask], ZonalStatsResult]:
+        if source.stac is not None:
+            options = {key: value for key, value in options.items() if key != "asset"}
+            if options.get("geometry_column") is None:
+                options["geometry_column"] = "geometry"
+            return self._resource.vector._bind_source(source, names, radius, options)
+        return super()._bind_source(source, names, radius, options)
+
+    def prepare(  # type: ignore[override]
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> ZonalJob:
+        """Prepare source calculations using the same options as stats() and batch()."""
+        return self._prepare(
+            aois,
+            labels=labels,
+            url=url,
+            sources=sources,
+            search=search,
+            stats=stats,
+            radius=radius,
+            asset=asset,
+            columns=columns,
+            geometry_column=geometry_column,
+            weighting_method=weighting_method,
+            approx_stats=approx_stats,
+        )
 
     def stats(  # type: ignore[override]
         self,
@@ -792,18 +1535,85 @@ class VectorStacStatsEndpoint(VectorStatsEndpoint):
             url=url,
             stats=stats,
             radius=radius,
-            asset=_asset(asset),
-            columns=_columns(columns),
-            geometry_column=_geometry_column(geometry_column),
-            weighting_method=_weighting_method(weighting_method),
+            asset=asset,
+            columns=columns,
+            geometry_column=geometry_column,
+            weighting_method=weighting_method,
             approx_stats=approx_stats,
         )
 
-    def batch(  # type: ignore[override]
+    @overload  # type: ignore[override]
+    def batch(
         self,
         aois: Any,
         *,
-        url: str,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[False] = False,
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
@@ -814,11 +1624,79 @@ class VectorStacStatsEndpoint(VectorStatsEndpoint):
         geometry_column: str | None = None,
         weighting_method: WeightingMethod | str | None = None,
         approx_stats: bool = False,
-    ) -> LazyBatch[BatchItem, ZonalStatsResult]:
-        """One STAC vector statistics request per area of interest, run lazily in parallel.
+    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: Literal[True],
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ): ...
+
+    def batch(
+        self,
+        aois: Any,
+        *,
+        url: str | None = None,
+        sources: Iterable[SourceInput] | None = None,
+        search: StacSearchLike | None = None,
+        stream: bool = False,
+        columns: Sequence[str],
+        labels: Iterable[Any] | None = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        errors: Literal["raise", "return"] = "raise",
+        stats: Iterable[Stat | str] | None = None,
+        radius: float | None = None,
+        asset: str | None = None,
+        geometry_column: str | None = None,
+        weighting_method: WeightingMethod | str | None = None,
+        approx_stats: bool = False,
+    ) -> (
+        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+    ):
+        """One STAC vector statistics request per area of interest, run in parallel.
 
         Takes the same options as [`stats`][..stats]; see
-        [`ZonalStatsEndpoint.batch`][datamermaid.resources.zonal_stats.ZonalStatsEndpoint.batch]
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
         for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
         options are validated before any request is made.
         """
@@ -829,27 +1707,30 @@ class VectorStacStatsEndpoint(VectorStatsEndpoint):
             max_workers=max_workers,
             errors=errors,
             url=url,
+            sources=sources,
+            search=search,
+            stream=stream,
             stats=stats,
             radius=radius,
-            asset=_asset(asset),
-            columns=_columns(columns),
-            geometry_column=_geometry_column(geometry_column),
-            weighting_method=_weighting_method(weighting_method),
+            asset=asset,
+            columns=columns,
+            geometry_column=geometry_column,
+            weighting_method=weighting_method,
             approx_stats=approx_stats,
         )
 
 
 #: Every route of the service, as ``(property name, endpoint class)``, in the
-#: order they appear on [`ZonalStatsResource`][.ZonalStatsResource].
-ZONAL_STATS_ENDPOINTS: tuple[tuple[str, type[ZonalStatsEndpoint]], ...] = (
-    ("raster", RasterStatsEndpoint),
-    ("raster_stac", RasterStacStatsEndpoint),
-    ("vector", VectorStatsEndpoint),
-    ("vector_stac", VectorStacStatsEndpoint),
+#: order they appear on [`ZonalStats`][.ZonalStats].
+ZONAL_STATS_ENDPOINTS: tuple[tuple[str, type[BaseZonalStats]], ...] = (
+    ("raster", RasterStats),
+    ("raster_stac", RasterStacStats),
+    ("vector", VectorStats),
+    ("vector_stac", VectorStacStats),
 )
 
 
-class ZonalStatsResource(BaseResource):
+class ZonalStats(BaseResource):
     """The Zonal Stats service, as ``client.zonal_stats``.
 
     [`path`][datamermaid.resources.base.BaseResource.path] is the absolute service
@@ -859,35 +1740,27 @@ class ZonalStatsResource(BaseResource):
     def __init__(self, client: MermaidClient) -> None:
         super().__init__(client)
         self.path = client.zonal_stats_url
-        self._endpoints: dict[type[ZonalStatsEndpoint], ZonalStatsEndpoint] = {}
 
-    def _endpoint(self, endpoint_class: type[E]) -> E:
-        endpoint = self._endpoints.get(endpoint_class)
-        if endpoint is None:
-            endpoint = endpoint_class(self)
-            self._endpoints[endpoint_class] = endpoint
-        return cast("E", endpoint)
-
-    @property
-    def raster(self) -> RasterStatsEndpoint:
+    @cached_property
+    def raster(self) -> RasterStats:
         """Statistics from a Cloud Optimized GeoTIFF, ``POST .../raster``."""
 
-        return self._endpoint(RasterStatsEndpoint)
+        return RasterStats(self)
 
-    @property
-    def raster_stac(self) -> RasterStacStatsEndpoint:
+    @cached_property
+    def raster_stac(self) -> RasterStacStats:
         """Statistics from a raster asset of a STAC Item, ``POST .../raster/stac``."""
 
-        return self._endpoint(RasterStacStatsEndpoint)
+        return RasterStacStats(self)
 
-    @property
-    def vector(self) -> VectorStatsEndpoint:
+    @cached_property
+    def vector(self) -> VectorStats:
         """Statistics from a GeoParquet file, ``POST .../vector``."""
 
-        return self._endpoint(VectorStatsEndpoint)
+        return VectorStats(self)
 
-    @property
-    def vector_stac(self) -> VectorStacStatsEndpoint:
+    @cached_property
+    def vector_stac(self) -> VectorStacStats:
         """Statistics from a GeoParquet asset of a STAC Item, ``POST .../vector/stac``."""
 
-        return self._endpoint(VectorStacStatsEndpoint)
+        return VectorStacStats(self)

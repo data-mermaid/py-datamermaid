@@ -156,3 +156,21 @@ def test_detail_truncates_a_long_validation_list():
     summary = _detail({"detail": errors})
     assert summary is not None
     assert len(summary) == 200
+
+
+@pytest.mark.parametrize("value", [True, False, 1.5, "2", None])
+def test_retry_count_requires_an_integer(value):
+    with pytest.raises(TypeError, match="max_retries"):
+        MermaidClient(max_retries=value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf"), -1])
+def test_backoff_requires_a_finite_nonnegative_number(value):
+    with pytest.raises(ValueError, match="backoff_factor"):
+        MermaidClient(backoff_factor=value)
+
+
+@pytest.mark.parametrize("value", [True, "1", None])
+def test_backoff_rejects_invalid_types(value):
+    with pytest.raises(TypeError, match="backoff_factor"):
+        MermaidClient(backoff_factor=value)

@@ -29,6 +29,7 @@ are converted) and serialises with ``json.dumps`` as it is.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from math import isfinite
 from numbers import Real
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
@@ -116,6 +117,8 @@ def _position(value: Any, *, what: str) -> Position:
     for component in value:
         if isinstance(component, bool) or not isinstance(component, Real):
             raise ValueError(f"{what} coordinates must be numbers, got {component!r}")
+        if not isfinite(component):
+            raise ValueError(f"{what} coordinates must be finite, got {component!r}")
         position.append(float(component))
     return position
 
@@ -144,6 +147,18 @@ def _polygon(coordinates: Any) -> list[list[Position]]:
     if not coordinates:
         raise ValueError("Polygon must have at least one ring")
     return [_ring(ring, index=index) for index, ring in enumerate(coordinates)]
+
+
+def _validate_radius(radius: float | None) -> float | None:
+    if radius is None:
+        return None
+    if isinstance(radius, bool) or not isinstance(radius, Real):
+        raise TypeError(f"radius must be a number of metres, got {radius!r}")
+    if not isfinite(radius):
+        raise ValueError(f"radius must be finite, got {radius!r}")
+    if radius < 0:
+        raise ValueError(f"radius must be >= 0, got {radius!r}")
+    return float(radius)
 
 
 def to_aoi(geometry: GeometryLike, *, radius: float | None = None) -> dict[str, Any]:
@@ -199,9 +214,5 @@ def to_aoi(geometry: GeometryLike, *, radius: float | None = None) -> dict[str, 
     if radius is not None:
         if geometry_type != "Point":
             raise ValueError(f"radius only applies to a Point aoi, not a {geometry_type}")
-        if isinstance(radius, bool) or not isinstance(radius, Real):
-            raise TypeError(f"radius must be a number of metres, got {radius!r}")
-        if radius < 0:
-            raise ValueError(f"radius must be >= 0, got {radius!r}")
-        aoi["radius"] = float(radius)
+        aoi["radius"] = _validate_radius(radius)
     return aoi

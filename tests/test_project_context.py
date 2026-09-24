@@ -10,6 +10,7 @@ than captured from a live response.
 from __future__ import annotations
 
 import datetime
+from functools import cached_property
 
 import httpx
 import pytest
@@ -113,7 +114,7 @@ def test_the_registry_lists_every_collection_on_the_context(project):
     exposed = {
         name: type(getattr(project, name))
         for name, attribute in vars(ProjectContext).items()
-        if isinstance(attribute, property) and name not in aggregated
+        if isinstance(attribute, (property, cached_property)) and name not in aggregated
     }
     assert exposed == dict(PROJECT_RESOURCES)
 
@@ -339,3 +340,31 @@ def test_the_projects_resource_stays_a_list_endpoint(client):
     assert isinstance(resource, ProjectsResource)
     assert resource.path == "projects/"
     assert client.projects is resource
+
+
+@respx.mock
+def test_project_ids_normalize_consistently_for_context_and_detail(client):
+    decorated = f"  /{PROJECT_ID}/  "
+    assert client.projects(decorated) is client.projects(PROJECT_ID)
+    route = respx.get(PROJECT_URL).respond(200, json=project_payload(id=PROJECT_ID))
+    assert client.projects.get(decorated).id == PROJECT_ID
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("identifier", ["", "  ", "///", " . ", " .. "])
+@respx.mock
+def test_empty_or_dot_ids_fail_before_requests(client, identifier):
+    with pytest.raises(ValueError):
+        client.projects(identifier)
+    with pytest.raises(ValueError):
+        client.projects.get(identifier)
+    assert not respx.calls
+
+
+@respx.mock
+def test_nonstring_ids_raise_type_error(client):
+    with pytest.raises(TypeError):
+        client.projects(42)
+    with pytest.raises(TypeError):
+        client.projects.get(42)
+    assert not respx.calls

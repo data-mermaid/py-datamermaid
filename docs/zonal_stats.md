@@ -190,6 +190,111 @@ does not read the geometry column from the file's metadata. Without
 | `client.zonal_stats.vector` | `vector` | a GeoParquet file | the column names you asked for |
 | `client.zonal_stats.vector_stac` | `vector/stac` | a GeoParquet asset of a STAC Item | the column names you asked for |
 
+For a runnable example with actual SST data and MERMAID sites, see
+[`zonal_stats_sst.py`](https://github.com/data-mermaid/py-datamermaid/blob/main/examples/zonal_stats_sst.py).
+It searches the [MERMAID catalog](https://mermaid.prescient.earth/stac) for
+`daily_sst` items, reads their `data` asset, and streams each site–day mean in
+Celsius to JSONL. See the [example instructions](examples.md#sea-surface-temperature-and-sites).
+
+## STAC searches and large jobs
+
+Pass a [pystac-client ItemSearch](https://pystac-client.readthedocs.io/en/latest/usage.html#itemsearch)
+as `search=`, or supply `sources=` with an iterable of STAC Items, item dictionaries,
+or URLs. Supply exactly one of `url`, `sources`, or `search`. No PySTAC dependency
+is required by the SDK; the adapter uses the search's `items_as_dicts()` method.
+Strings retain the selected endpoint's URL meaning: item JSON URLs for STAC
+endpoints, data URLs for ordinary raster/vector endpoints.
+
+A search expands to one calculation per AOI per item. It does not mosaic,
+merge overlapping scenes, or filter pairs by footprint. Choose `asset=` explicitly
+on the STAC endpoints to select the same asset key in each item; otherwise the
+first asset is selected. Item assets are resolved to data URLs and sent to the
+ordinary raster/vector endpoint, preserving signed URLs and avoiding a second
+fetch of the item JSON. The statistics service must be able to read those URLs;
+credentials from the STAC search client are not forwarded. Vector STAC searches
+retain the `geometry` column default.
+
+Prepare a large job to inspect its size before sending statistics requests:
+
+```python
+job = client.zonal_stats.raster_stac.prepare(
+    sites,
+    search=search,
+    asset="temperature",
+    stats=["mean"],
+    radius=500,
+)
+print(job.request_count)  # 1,000 sites × 1,000 items = 1,000,000
+```
+
+Preparation fetches the search once and retains the AOIs and resolved source
+metadata. It does not allocate the Cartesian product. Each source is bound to its
+request target during preparation, using the same option validation and defaults
+as `stats()` and `batch()`. Search failures, missing assets, and invalid shared
+options fail during preparation, before calculations start. Empty searches produce zero requests. Relative asset URLs require an
+absolute item `self` link. Items without a single datetime retain their
+`start_datetime` and `end_datetime` metadata as well.
+
+For large jobs, consume a **single-pass stream** and write each result as it
+arrives. Keep the client open throughout consumption:
+
+```python
+import json
+from datamermaid import BatchFailure
+
+with job.run(stream=True, max_workers=8, errors="return") as results:
+    with open("zonal-results.jsonl", "w") as output:
+        for result in results:
+            if isinstance(result, BatchFailure):
+                row = {
+                    "label": result.item.label,
+                    "source": result.item.source.url,
+                    "stac": result.item.source.stac,
+                    "error": str(result.error),
+                }
+            else:
+                row = result.to_dict()
+            output.write(json.dumps(row) + "\n")
+```
+
+The stream starts work on iteration, retains at most `max_workers` pending
+calculations, and yields in AOI order, then source order within each AOI. An early
+slow request can delay delivery of later results. Consumed results are not kept
+by the stream. Use the context manager when breaking early: it cancels queued
+work and waits for requests already in flight. With `errors="raise"`, iteration
+raises the original exception and stops scheduling more work. With
+`errors="return"`, failures carry their input pair and original exception.
+
+Successful results retain the AOI `label`, resolved `source` URL, and a `stac`
+mapping containing item ID, collection, datetime, and selected asset. Both wide
+and long exports include STAC provenance. Small jobs may use `job.run()` and
+`batch.to_df()`; those retain all pairs and results in memory. A stream deliberately
+has no `to_df()` method: collecting it into a list or DataFrame would consume
+memory proportional to the full job.
+
+You can also stream directly, without inspecting the count first:
+
+```python
+with client.zonal_stats.raster_stac.batch(
+    sites,
+    search=search,
+    asset="temperature",
+    stats=["mean"],
+    radius=500,
+    stream=True,
+) as results:
+    for result in results:
+        print(result.label, result.stac, result["band_1"]["mean"])
+```
+
+`stream=True` also works with a single `url=` and with vector endpoints
+(which still require `columns=`). Existing `batch(..., url=...)` calls remain
+eager by default. Streaming does not reduce the number of requests, provide a
+persistent checkpoint, or automatically resume an interrupted job. Running a
+prepared job again repeats the calculations; saved JSONL rows can be used by
+applications to track completed pairs. Signed asset URLs must remain valid for
+the duration of execution.
+
 ## Many areas at once
 
 Every endpoint also has a `batch` method: one request per area of interest, run
@@ -205,27 +310,20 @@ batch = client.zonal_stats.raster.batch(
     radius=500,
     max_workers=4,
 )
-len(batch)  # the number of sites, with no statistics request sent yet
-batch[0].label  # one request: the first site's id
+len(batch)  # all statistics requests have finished
+batch[0].label  # the first site's id; no additional request
 ```
 
 A site's `location` is optional, and a site without one has no area to
 measure. The filter leaves those sites out. Without it, each such site fails
 with a `ValueError` at its position, and with the default `errors="raise"` that
-stops `to_df()` from returning a table at all.
+raises from `batch(...)`.
 
-`batch(...)` reads the areas in full when you call it, because it needs their
-number and their labels. A lazy list such as `sites.list()` therefore fetches
-every page of sites at that call, and an error from the sites listing is raised
-there. Only the statistics requests wait.
-
-`batch` returns a [`LazyBatch`][datamermaid.batch.LazyBatch], which is to a list
-of independent requests what
-[`PaginatedList`][datamermaid.pagination.PaginatedList] is to a paginated
-endpoint. No statistics request runs until you iterate, index or export it.
-Indexing computes one item, a slice computes what it covers, and iteration
-keeps at most `max_workers` requests ahead of you, so a loop that stops early
-wastes at most one window of work. Every result is cached by position, so nothing runs twice.
+`batch(...)` reads all areas and waits for all statistics requests to finish.
+A lazy list such as `sites.list()` therefore fetches every page at this call.
+The returned [`Batch`][datamermaid.batch.Batch] holds results in input order.
+Iteration, indexing, slicing, `results()`, and `to_df()` read completed results
+without making additional requests. Pass a subset of areas to preview a batch.
 
 `max_workers` is how many requests are in flight at once, eight by default. The
 options are checked before anything runs, so a misspelled statistic or an empty
@@ -238,7 +336,7 @@ tells the rows apart once the batch is flattened.
 
 ### Wide rows and long rows
 
-`to_df()` computes every item and gives one wide row per area: `label`,
+`to_df()` gives one wide row per area: `label`,
 `source`, then one column per band and statistic, named `band_1_mean`,
 `band_1_count` and so on. It needs the optional `pandas` extra.
 
@@ -248,7 +346,8 @@ frame[["label", "band_1_mean", "band_1_count"]].head()
 ```
 
 For a tidy frame instead, `to_records()` on one result gives one row per
-statistic, `{label, band, stat, value}`:
+statistic, `{label, source, band, stat, value}`. Every row includes `source`,
+including results from plain URLs, so results for the same site remain distinguishable:
 
 ```python
 import pandas as pd
@@ -260,34 +359,47 @@ long_frame.pivot(index="label", columns="stat", values="value")
 
 ### When one area fails
 
-A failed request does not spoil the rest. With the default `errors="raise"` the
-exception is re-raised when you reach that position, after everything before it
-has been yielded. With `errors="return"` you get the exception object in its
-place and iteration carries on:
+All areas are processed even if some fail. With the default `errors="raise"`,
+`batch(...)` raises the first exception in input order after the work finishes.
+With `errors="return"`, the completed batch contains a `BatchFailure` in place of
+that area's result. Its `.item` identifies the site/source and `.error` holds the
+original exception:
 
 ```python
+from datamermaid import BatchFailure
+
 batch = client.zonal_stats.raster.batch(
     sites, url="https://example.test/depth.tif", stats=["mean"], errors="return"
 )
 
 for item in batch:
-    if isinstance(item, Exception):
-        print("failed:", item)
+    if isinstance(item, BatchFailure):
+        print("failed:", item.item.label, item.item.source.url, item.error)
     else:
         print(item.label, item["band_1"]["mean"])
 ```
 
-`to_df()` in that mode gives a row whose `error` column holds the exception.
-The row keeps its `label`, so you can see which area failed, and its other
+`to_df()` in that mode gives a row whose `error` column holds the `BatchFailure`.
+The row keeps its `label`, `source`, and STAC metadata when available; statistic
 columns are empty. A partly failing batch still produces a table.
 
-`batch.fetched` shows what has run so far, keyed by position, without running
-anything more. A failed item appears as its exception whichever error mode you
-chose.
+### Uniform batch failures and inputs
 
-```python
-batch.fetched  # {0: ZonalStatsResult(...), 1: MermaidAPIError(...)}
-```
+Every zonal batch now exposes `ZonalTask` inputs, including a single `url=` batch.
+Use `task.aoi`, `task.label`, and `task.source`. The old `BatchItem` tuple remains
+importable for compatibility but is no longer returned by batches.
+
+Both `Batch` and `BatchStream` return `BatchFailure` with `errors="return"`.
+Code that previously checked `isinstance(result, ValueError)` should check
+`isinstance(result, BatchFailure)` and then inspect `result.error`. With
+`errors="raise"`, the original exception is still raised. This is a change to
+the returned failure/input shapes; calling syntax and successful results are unchanged.
+
+### Migrating from lazy batches
+
+`Batch` replaces `LazyBatch`. Requests and errors now occur during `batch(...)`;
+put that call inside your error handler. The `fetched` property has been removed
+because all results are complete. Use `results()` or iterate the batch instead.
 
 ### The throttle is shared
 
@@ -322,11 +434,11 @@ The Zonal Stats service raises the same exceptions as the rest of the SDK, from
 So `except MermaidError` around `stats()` catches every failure from the
 service. The local `ValueError` and `TypeError` are not `MermaidError`s.
 
-In a batch, the options are still checked at the `batch(...)` call. A bad area
-of interest is not: it fails at its own position, like a failed request. With
-`errors="raise"` its `ValueError` or `TypeError` is raised when you reach that
-position. With `errors="return"` it is returned in place of the result, and
-nothing is raised.
+In a batch, shared options are checked before requests start. Each area of
+interest is validated by its worker. With `errors="raise"`, the first error in
+input order is raised from `batch(...)` after all workers finish. With
+`errors="return"`, an invalid area's `ValueError` or `TypeError` is returned in
+place of its result.
 
 ## Configuration
 
@@ -363,6 +475,12 @@ client's own.
   `Stat` and `WeightingMethod`
 - [Models](reference/models.md) for
   [`ZonalStatsResult`][datamermaid.models.ZonalStatsResult]
-- [Batches](reference/batch.md) for [`LazyBatch`][datamermaid.batch.LazyBatch]
+- [Batches](reference/batch.md) for [`Batch`][datamermaid.batch.Batch]
 - [Geometry](reference/geometry.md) for
   [`to_aoi`][datamermaid.geometry.to_aoi]
+
+STAC inputs are structurally typed: `StacSearchLike` describes an object with
+`items_as_dicts()`, and `StacItemLike` describes one with `to_dict()`. Real
+pystac objects can be passed directly; the SDK does not require pystac to be
+installed when working with URLs or item dictionaries. `SourceInput` names the
+union of accepted source types. These types are exported from `datamermaid`.

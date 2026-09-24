@@ -1,8 +1,9 @@
 """Exception hierarchy for the MERMAID SDK.
 
-Every error raised by this package derives from
-[`MermaidError`][datamermaid.exceptions.MermaidError], so ``except MermaidError`` is
-always enough to catch SDK failures.  HTTP failures are mapped to dedicated subclasses
+Request and authentication failures derive from
+[`MermaidError`][datamermaid.exceptions.MermaidError]. Invalid caller arguments
+raise standard ``TypeError`` or ``ValueError`` exceptions. HTTP failures are mapped to
+dedicated subclasses
 by [`raise_for_status`][.raise_for_status].
 """
 
@@ -29,7 +30,7 @@ __all__ = [
 
 
 class MermaidError(Exception):
-    """Base class for every error raised by ``datamermaid``."""
+    """Base class for request and authentication errors."""
 
 
 class MermaidConnectionError(MermaidError):

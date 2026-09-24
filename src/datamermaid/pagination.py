@@ -151,6 +151,7 @@ class PaginatedList(Generic[T]):
         Requires the optional ``pandas`` extra.
         """
 
+        _require_pandas()  # Fail before fetching any pages.
         return to_dataframe(list(self), **kwargs)
 
 

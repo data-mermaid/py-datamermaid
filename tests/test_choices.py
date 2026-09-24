@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from datamermaid.exceptions import NotFoundError
+from datamermaid.exceptions import MermaidConnectionError, NotFoundError
 
 from .conftest import BASE_URL, load_fixture
 
@@ -73,7 +73,7 @@ def test_a_nameless_choice_set_is_rejected(client):
         return_value=httpx.Response(200, json=[{"data": [{"id": "1", "name": "first"}]}])
     )
 
-    with pytest.raises(TypeError, match="without a name"):
+    with pytest.raises(MermaidConnectionError, match="without a name"):
         client.choices()
 
 
@@ -85,7 +85,7 @@ def test_duplicate_choice_set_names_are_rejected(client):
     ]
     respx.get(f"{BASE_URL}choices/").mock(return_value=httpx.Response(200, json=payload))
 
-    with pytest.raises(ValueError, match="two choice sets named 'reeftypes'"):
+    with pytest.raises(MermaidConnectionError, match="two choice sets named 'reeftypes'"):
         client.choices()
 
 
@@ -97,5 +97,5 @@ def test_a_paginated_response_would_be_rejected(client):
         return_value=httpx.Response(200, json={"count": 1, "results": CHOICES})
     )
 
-    with pytest.raises(TypeError, match="list of choice sets"):
+    with pytest.raises(MermaidConnectionError, match="list of choice sets"):
         client.choices()

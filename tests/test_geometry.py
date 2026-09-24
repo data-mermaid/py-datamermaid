@@ -326,3 +326,15 @@ def test_to_aoi_is_exported_from_the_package():
     assert "GeometryLike" in datamermaid.__all__
     assert "HasGeoInterface" in datamermaid.__all__
     assert GeometryLike is datamermaid.geometry.GeometryLike
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_coordinates_and_radii_are_rejected(value):
+    with pytest.raises(ValueError, match="finite"):
+        to_aoi((value, 2))
+    with pytest.raises(ValueError, match="finite"):
+        to_aoi({"type": "Polygon", "coordinates": [[[value, 2], [1, 3], [1, 2], [value, 2]]]})
+    with pytest.raises(ValueError, match="finite"):
+        to_aoi(POINT, radius=value)
+    with pytest.raises(ValueError, match="finite"):
+        to_aoi({**POINT, "radius": value})

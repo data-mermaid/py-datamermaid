@@ -56,8 +56,6 @@ __all__ = [
 
 M = TypeVar("M", bound="APIModel")
 
-#: ``dataclasses.field`` metadata key holding the API's name for a field.
-API_FIELD = "api_field"
 #: ``dataclasses.field`` metadata key holding a value converter.
 CONVERTER = "converter"
 
@@ -148,20 +146,13 @@ def _model(model: type[M]) -> Callable[[Any], M | None]:
     return convert
 
 
-def _api_meta(
-    api_field: str | None = None, converter: Callable[[Any], Any] | None = None
-) -> dict[str, Any]:
-    meta: dict[str, Any] = {}
-    if api_field is not None:
-        meta[API_FIELD] = api_field
-    if converter is not None:
-        meta[CONVERTER] = converter
-    return meta
+def _api_meta(*, converter: Callable[[Any], Any]) -> dict[str, Any]:
+    return {CONVERTER: converter}
 
 
 @dataclass(frozen=True)
 class APIModel:
-    """Base class providing lossless construction from an API payload."""
+    """Base class providing lossless construction using API keys as field names."""
 
     extra: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -185,7 +176,7 @@ class APIModel:
         for model_field in fields(cls):
             if model_field.name == "extra" or not model_field.init:
                 continue
-            key = model_field.metadata.get(API_FIELD, model_field.name)
+            key = model_field.name
             if key not in payload:
                 continue
             value = payload[key]
@@ -213,7 +204,7 @@ class APIModel:
         for model_field in fields(self):
             if model_field.name == "extra":
                 continue
-            key = model_field.metadata.get(API_FIELD, model_field.name)
+            key = model_field.name
             if key in extra:
                 # `from_api` only leaves a declared key in `extra` when its
                 # conversion failed, so the raw value is the one to keep.
@@ -1070,7 +1061,7 @@ class ZonalStatsResult:
 
     [`to_dict`][.to_dict] gives one wide row (``band_1_mean``, ``band_1_count``,
     ...) so [`to_dataframe`][datamermaid.pagination.to_dataframe] works on a list of
-    results, and [`to_records`][.to_records] gives long ``(label, band, stat, value)``
+    results, and [`to_records`][.to_records] gives long ``(label, source, band, stat, value)``
     rows for reshaping.
     """
 
@@ -1082,6 +1073,8 @@ class ZonalStatsResult:
     source: str
     #: Caller-supplied identifier, carried through unchanged.
     label: Any = None
+    #: STAC item identity and selected asset, when resolved from a search or item.
+    stac: Mapping[str, Any] | None = None
 
     @classmethod
     def from_api(
@@ -1143,16 +1136,25 @@ class ZonalStatsResult:
         """
 
         row: dict[str, Any] = {"label": self.label, "source": self.source}
+        if self.stac is not None:
+            row["stac"] = dict(self.stac)
         for band, values in self.stats.items():
             for stat, value in values.items():
                 row[f"{band}_{stat}"] = value
         return row
 
     def to_records(self) -> list[dict[str, Any]]:
-        """One long ``{label, band, stat, value}`` row per statistic."""
+        """One long ``{label, source, band, stat, value}`` row per statistic."""
 
         return [
-            {"label": self.label, "band": band, "stat": stat, "value": value}
+            {
+                "label": self.label,
+                "source": self.source,
+                "band": band,
+                "stat": stat,
+                "value": value,
+                **({"stac": dict(self.stac)} if self.stac is not None else {}),
+            }
             for band, values in self.stats.items()
             for stat, value in values.items()
         ]

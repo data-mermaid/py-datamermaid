@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from urllib.parse import parse_qsl, quote, urlsplit
 
+from ..exceptions import MermaidConnectionError
 from ..models import APIModel
 from ..pagination import Page, PaginatedList
 
@@ -14,6 +16,20 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 __all__ = ["BaseResource", "ReadOnlyResource", "Resource", "project_path"]
 
 M = TypeVar("M", bound=APIModel)
+T = TypeVar("T")
+
+
+def _normalize_id(value: str | None, *, name: str = "record id") -> str:
+    if value is None:
+        raise ValueError(f"a {name} is required")
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    normalized = value.strip().strip("/").strip()
+    if not normalized:
+        raise ValueError(f"a {name} is required")
+    if normalized in (".", ".."):
+        raise ValueError(f"{name} must not be a dot path segment")
+    return normalized
 
 
 def project_path(project_id: str, route: str) -> str:
@@ -23,7 +39,7 @@ def project_path(project_id: str, route: str) -> str:
     request to a different endpoint.
     """
 
-    return f"projects/{quote(project_id.strip('/'), safe='')}/{route}"
+    return f"projects/{quote(_normalize_id(project_id, name='project id'), safe='')}/{route}"
 
 
 class BaseResource:
@@ -49,8 +65,15 @@ class BaseResource:
         the request to a different endpoint.
         """
 
-        suffix = "".join(quote(part.strip("/"), safe="") + "/" for part in parts)
+        suffix = "".join(quote(_normalize_id(part), safe="") + "/" for part in parts)
         return f"{self.path}{suffix}"
+
+    def _decode_response(self, data: Any, parser: Callable[[Any], T], url: str) -> T:
+        """Translate invalid server payloads without intercepting request/input errors."""
+        try:
+            return parser(data)
+        except (TypeError, ValueError) as exc:
+            raise MermaidConnectionError(f"GET {url} returned an invalid response: {exc}") from exc
 
 
 class Resource(BaseResource, Generic[M]):
@@ -77,11 +100,18 @@ class Resource(BaseResource, Generic[M]):
             return Page(items=[self._parse(item) for item in data], count=len(data))
         if not isinstance(data, dict):
             raise TypeError(f"expected a list response, got {type(data).__name__}")
-        return Page(
-            items=[self._parse(item) for item in data.get("results") or []],
-            next_url=data.get("next"),
-            count=data.get("count"),
-        )
+        rows = data.get("results")
+        if not isinstance(rows, list):
+            raise TypeError("expected a results array in the paginated response")
+        next_url = data.get("next")
+        if next_url is not None and (not isinstance(next_url, str) or not next_url):
+            raise TypeError("next must be a non-empty URL string or null")
+        count = data.get("count")
+        if count is not None and (
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+        ):
+            raise TypeError("count must be a non-negative integer or null")
+        return Page(items=[self._parse(item) for item in rows], next_url=next_url, count=count)
 
     def _next_request(self, first_url: str, next_url: str) -> tuple[str, dict[str, Any] | None]:
         """Resolve a ``next`` link into a request the client may safely make.
@@ -114,12 +144,13 @@ class Resource(BaseResource, Generic[M]):
 
         def fetch(next_url: str | None) -> Page[M]:
             if next_url is None:
-                data = self._client.request_json("GET", first_url, params=query or None)
+                page_url = first_url
+                data = self._client.request_json("GET", page_url, params=query or None)
             else:
                 # `next` already carries the pagination and filter parameters.
                 page_url, page_params = self._next_request(first_url, next_url)
                 data = self._client.request_json("GET", page_url, params=page_params)
-            return self._page(data)
+            return self._decode_response(data, self._page, page_url)
 
         return PaginatedList(fetch)
 
@@ -131,7 +162,7 @@ class Resource(BaseResource, Generic[M]):
         """Fetch and parse a single record."""
 
         data = self._client.request_json("GET", url, params=params or None)
-        return self._parse(data)
+        return self._decode_response(data, self._parse, url)
 
 
 class ReadOnlyResource(Resource[M]):
@@ -141,7 +172,16 @@ class ReadOnlyResource(Resource[M]):
     this and declare those two attributes.
     """
 
-    def list(self, **filters: Any) -> PaginatedList[M]:
+    def list(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        search: str | None = None,
+        ordering: str | None = None,
+        fields: str | None = None,
+        **filters: Any,
+    ) -> PaginatedList[M]:
         """List records, lazily fetching pages as they are consumed.
 
         Keyword arguments become query parameters, so anything the endpoint
@@ -150,7 +190,16 @@ class ReadOnlyResource(Resource[M]):
         ``fields``.  An argument whose value is ``None`` is left out.
         """
 
-        return self._list(params=dict(filters))
+        return self._list(
+            params={
+                **filters,
+                "limit": limit,
+                "offset": offset,
+                "search": search,
+                "ordering": ordering,
+                "fields": fields,
+            }
+        )
 
     def get(self, record_id: str, **params: Any) -> M:
         """Fetch a single record by id.

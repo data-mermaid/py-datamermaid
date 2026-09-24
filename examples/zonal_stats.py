@@ -26,6 +26,7 @@ import sys
 from datamermaid import (
     AuthenticationError,
     AuthFlowError,
+    BatchFailure,
     MermaidClient,
     MermaidConnectionError,
     NotFoundError,
@@ -202,7 +203,11 @@ def main() -> int:
     errors = frame.get("error")
     if (
         errors is not None
-        and errors.map(lambda error: isinstance(error, MermaidConnectionError)).all()
+        and errors.map(
+            lambda error: (
+                isinstance(error, BatchFailure) and isinstance(error.error, MermaidConnectionError)
+            )
+        ).all()
     ):
         # Every request failed to connect, so the service itself is down or
         # the URL is wrong.  One message reads better than a table of failures.
@@ -220,7 +225,7 @@ def main() -> int:
     failed = 0
     if "error" in frame:
         reasons = frame["error"].map(
-            lambda error: type(error).__name__ if isinstance(error, Exception) else None
+            lambda error: type(error.error).__name__ if isinstance(error, BatchFailure) else None
         )
         frame["error"] = reasons
         failed = int(reasons.notna().sum())

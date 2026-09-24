@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from datamermaid import LazyBatch, MermaidAPIError, MermaidClient, Site, Stat, WeightingMethod
+from datamermaid import Batch, MermaidAPIError, MermaidClient, Site, Stat, WeightingMethod
 from datamermaid.resources.zonal_stats import BatchItem, _expand_aois, _resolve_labels
 
 from .conftest import ZONAL_STATS_URL, load_fixture
@@ -87,8 +87,8 @@ def test_batch_issues_one_post_per_aoi_in_order(client):
     route = respx.post(RASTER_URL).mock(return_value=ok())
 
     batch = client.zonal_stats.raster.batch(POINTS, url=COG, stats=["mean"])
-    assert isinstance(batch, LazyBatch)
-    assert route.call_count == 0
+    assert isinstance(batch, Batch)
+    assert route.call_count == 3
     assert len(batch) == 3
 
     results = batch.results()
@@ -174,13 +174,12 @@ def test_vector_batch_rejects_bad_options_before_any_request(client):
 
 
 @respx.mock
-def test_batch_is_lazy_and_cached(client):
+def test_batch_finishes_before_returning_and_reads_make_no_requests(client):
     route = respx.post(RASTER_URL).mock(return_value=ok())
     batch = client.zonal_stats.raster.batch(POINTS, url=COG)
 
     assert batch[1].label == 1
-    assert route.call_count == 1
-    assert json.loads(route.calls.last.request.content)["aoi"] == POINTS[1]
+    assert route.call_count == 3
 
     assert [result.label for result in batch] == [0, 1, 2]
     assert route.call_count == 3
@@ -213,13 +212,13 @@ def test_batch_matches_stats_body_for_body(client):
 def test_base_endpoint_batch_forwards_options(client):
     """The generic endpoint's ``batch`` takes ``**options`` like its ``stats``."""
 
-    from datamermaid.resources.zonal_stats import ZonalStatsEndpoint
+    from datamermaid.resources.zonal_stats import BaseZonalStats
 
-    class VectorStatsEndpoint(ZonalStatsEndpoint):
+    class VectorStats(BaseZonalStats):
         route = "vector"
 
     route = respx.post(f"{ZONAL_STATS_URL}vector").mock(return_value=ok())
-    endpoint = VectorStatsEndpoint(client.zonal_stats)
+    endpoint = VectorStats(client.zonal_stats)
 
     endpoint.batch(POINTS[:1], url=COG, columns=["depth"], missing=None).results()
 
@@ -231,7 +230,7 @@ def test_batch_uses_max_workers(client):
     route = respx.post(RASTER_URL).mock(return_value=ok())
     batch = client.zonal_stats.raster.batch(POINTS, url=COG, max_workers=2)
     assert batch.max_workers == 2
-    assert repr(batch) == "<LazyBatch computed=0/3 max_workers=2>"
+    assert repr(batch) == "<Batch results=3 max_workers=2>"
     batch.results()
     assert route.call_count == 3
 
@@ -277,7 +276,7 @@ def test_to_df_keeps_the_label_of_a_failed_aoi(client):
     ).to_df()
 
     assert frame["label"].tolist() == ["a", "b", "c"]
-    assert isinstance(frame.loc[1, "error"], ValueError)
+    assert isinstance(frame.loc[1, "error"].error, ValueError)
     assert frame["error"].isna().tolist() == [True, False, True]
 
 
@@ -306,7 +305,7 @@ def test_a_site_without_a_location_fails_at_its_position(client):
     results = client.zonal_stats.raster.batch(sites, url=COG, errors="return").results()
 
     assert results[0].label == "a"
-    assert isinstance(results[1], ValueError)
+    assert isinstance(results[1].error, ValueError)
     assert "'b'" in str(results[1])
     assert results[2].label == "c"
 
@@ -394,7 +393,9 @@ def test_expand_and_resolve_helpers():
 def test_batch_inputs_are_items(client):
     respx.post(RASTER_URL).mock(return_value=ok())
     batch = client.zonal_stats.raster.batch(POINTS[:1], url=COG, labels=["only"])
-    assert batch.inputs == [BatchItem(POINTS[0], "only")]
+    assert [(task.aoi, task.label, task.source.url) for task in batch.inputs] == [
+        (POINTS[0], "only", COG)
+    ]
 
 
 # -- errors -----------------------------------------------------------------
@@ -410,17 +411,12 @@ def test_a_failing_aoi_does_not_spoil_the_others(client):
         )
     )
 
-    batch = client.zonal_stats.raster.batch(POINTS, url=COG, max_workers=1)
-    seen = []
     with pytest.raises(MermaidAPIError, match="Error opening raster file"):
-        for result in batch:
-            seen.append(result.label)
-    assert seen == [0]
-    assert batch[2].label == 2
+        client.zonal_stats.raster.batch(POINTS, url=COG, max_workers=1)
 
     returned = client.zonal_stats.raster.batch(POINTS, url=COG, errors="return").results()
     assert returned[0].label == 0
-    assert isinstance(returned[1], MermaidAPIError)
+    assert isinstance(returned[1].error, MermaidAPIError)
     assert returned[2].label == 2
 
 
@@ -433,7 +429,7 @@ def test_a_bad_aoi_fails_at_its_position_without_a_request(client):
 
     assert route.call_count == 2
     assert results[0].label == 0
-    assert isinstance(results[1], ValueError)
+    assert isinstance(results[1].error, ValueError)
     assert results[2].label == 2
 
 

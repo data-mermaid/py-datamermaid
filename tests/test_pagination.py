@@ -130,8 +130,19 @@ def test_to_df_raises_an_informative_error_without_pandas(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    paginated, _ = make_list([([{"a": 1}], False)])
+    paginated, calls = make_list([([{"a": 1}], True), ([{"a": 2}], False)])
     with pytest.raises(ImportError) as excinfo:
         paginated.to_df()
+    assert calls == []
     assert PANDAS_INSTALL_HINT in str(excinfo.value)
     assert "datamermaid[pandas]" in str(excinfo.value)
+
+
+def test_dataframe_preview_does_not_fetch_following_pages():
+    pytest.importorskip("pandas")
+    from datamermaid.pagination import to_dataframe
+
+    paginated, calls = make_list([([{"a": 1}], True), ([{"a": 2}], False)])
+    frame = to_dataframe(paginated[:1])
+    assert frame["a"].tolist() == [1]
+    assert calls == [None]

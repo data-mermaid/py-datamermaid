@@ -8,6 +8,10 @@ a `pandas` DataFrame.
 The examples below use the fish taxonomy, which is public, so you can paste any
 of them into a REPL without credentials.
 
+Common query options (`limit`, `offset`, `search`, `ordering`, and `fields`) have
+named, typed parameters for editor completion. Additional API filters are still
+passed through unchanged; unknown filter names are not checked locally.
+
 ## Lazy loading
 
 `.list()` issues no request at all. The first page is fetched when you first
@@ -118,6 +122,16 @@ That is why a server-side addition can never break parsing: it lands in `extra`.
 A value that fails conversion (an unparseable date, say) is also left in `extra`
 under its original key, and the declared field keeps its default, so nothing is
 silently lost.
+
+
+`limit` controls records per page, not the total returned. Iteration and `to_df()`
+follow every page. For a bounded preview, slice first:
+
+```python
+from datamermaid.pagination import to_dataframe
+
+preview = to_dataframe(client.projects.list(limit=5)[:5])
+```
 
 ## DataFrames
 
@@ -231,8 +245,9 @@ print(reef_types.get(site.reef_type))
 
 ## Errors
 
-Every exception derives from [`MermaidError`][datamermaid.exceptions.MermaidError],
-so one `except` clause is always enough.
+Request and authentication errors derive from
+[`MermaidError`][datamermaid.exceptions.MermaidError]. Invalid arguments raise
+`TypeError` or `ValueError`; missing optional dependencies raise `ImportError`.
 
 | Status | Exception |
 | --- | --- |

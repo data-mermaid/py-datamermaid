@@ -22,7 +22,8 @@ with flat rows rather than nested models.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..models import (
     APIModel,
@@ -51,10 +52,9 @@ from .aggregated import (
     BLEACHINGQCS,
     HABITATCOMPLEXITIES,
     AggregatedFamilyResource,
-    AggregatedViewFamily,
     BleachingQCFamilyResource,
 )
-from .base import ReadOnlyResource, project_path
+from .base import ReadOnlyResource, _normalize_id, project_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
@@ -81,10 +81,6 @@ __all__ = [
 ]
 
 M = TypeVar("M", bound=APIModel)
-#: A resource wrapper cached on a context, for `ProjectContext._resource`.
-R = TypeVar("R", bound="ProjectResource[Any]")
-#: An aggregated view family, for `ProjectContext._aggregated`.
-A = TypeVar("A", bound=AggregatedFamilyResource)
 
 
 class ProjectResource(ReadOnlyResource[M]):
@@ -100,8 +96,8 @@ class ProjectResource(ReadOnlyResource[M]):
 
     def __init__(self, client: MermaidClient, project_id: str) -> None:
         super().__init__(client)
-        self.project_id = project_id
-        self.path = project_path(project_id, self.route)
+        self.project_id = _normalize_id(project_id, name="project id")
+        self.path = project_path(self.project_id, self.route)
 
 
 class ProjectSitesResource(ProjectResource[Site]):
@@ -279,155 +275,132 @@ class ProjectContext:
 
     def __init__(self, client: MermaidClient, project: str | Project) -> None:
         project_id = project.id if isinstance(project, Project) else project
-        if not project_id or not str(project_id).strip():
-            raise ValueError("a project id is required")
-
         self._client = client
-        self.project_id = str(project_id).strip()
-        self._resources: dict[type[Any], Any] = {}
-        self._families: dict[str, AggregatedFamilyResource] = {}
+        self.project_id = _normalize_id(project_id, name="project id")
 
     def __repr__(self) -> str:
         return f"ProjectContext(project_id={self.project_id!r})"
 
-    def _resource(self, resource_class: type[R]) -> R:
-        """Return this context's single instance of ``resource_class``."""
-
-        resource = self._resources.get(resource_class)
-        if resource is None:
-            resource = resource_class(self._client, self.project_id)
-            self._resources[resource_class] = resource
-        return cast("R", resource)
-
-    def _aggregated(self, family: AggregatedViewFamily, resource_class: type[A]) -> A:
-        """Return this context's single resource for one aggregated family."""
-
-        resource = self._families.get(family.family)
-        if resource is None:
-            resource = resource_class(self._client, self.project_id, family)
-            self._families[family.family] = resource
-        return cast("A", resource)
-
-    @property
+    @cached_property
     def sites(self) -> ProjectSitesResource:
         """The project's reef sites, ``/projects/{id}/sites/``."""
 
-        return self._resource(ProjectSitesResource)
+        return ProjectSitesResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def managements(self) -> ProjectManagementsResource:
         """The project's management regimes, ``/projects/{id}/managements/``."""
 
-        return self._resource(ProjectManagementsResource)
+        return ProjectManagementsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def observers(self) -> ProjectObserversResource:
         """Observers credited on the project's surveys, ``/projects/{id}/observers/``."""
 
-        return self._resource(ProjectObserversResource)
+        return ProjectObserversResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def project_profiles(self) -> ProjectProfilesResource:
         """The project's members, ``/projects/{id}/project_profiles/``."""
 
-        return self._resource(ProjectProfilesResource)
+        return ProjectProfilesResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def sample_events(self) -> ProjectSampleEventsResource:
         """The project's sample events, ``/projects/{id}/sampleevents/``."""
 
-        return self._resource(ProjectSampleEventsResource)
+        return ProjectSampleEventsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def fishbelt_transects(self) -> ProjectFishBeltTransectsResource:
         """Fish belt transects, ``/projects/{id}/fishbelttransects/``."""
 
-        return self._resource(ProjectFishBeltTransectsResource)
+        return ProjectFishBeltTransectsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def benthic_transects(self) -> ProjectBenthicTransectsResource:
         """Benthic transects, ``/projects/{id}/benthictransects/``."""
 
-        return self._resource(ProjectBenthicTransectsResource)
+        return ProjectBenthicTransectsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def beltfish_methods(self) -> ProjectBeltFishMethodsResource:
         """Fish belt surveys, ``/projects/{id}/beltfishtransectmethods/``."""
 
-        return self._resource(ProjectBeltFishMethodsResource)
+        return ProjectBeltFishMethodsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def benthiclit_methods(self) -> ProjectBenthicLITMethodsResource:
         """Benthic LIT surveys, ``/projects/{id}/benthiclittransectmethods/``."""
 
-        return self._resource(ProjectBenthicLITMethodsResource)
+        return ProjectBenthicLITMethodsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def benthicpit_methods(self) -> ProjectBenthicPITMethodsResource:
         """Benthic PIT surveys, ``/projects/{id}/benthicpittransectmethods/``."""
 
-        return self._resource(ProjectBenthicPITMethodsResource)
+        return ProjectBenthicPITMethodsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def benthicpqt_methods(self) -> ProjectBenthicPQTMethodsResource:
         """Benthic photo quadrat surveys, ``/projects/{id}/benthicphotoquadrattransectmethods/``."""
 
-        return self._resource(ProjectBenthicPQTMethodsResource)
+        return ProjectBenthicPQTMethodsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def habitatcomplexity_methods(self) -> ProjectHabitatComplexityMethodsResource:
         """Habitat complexity surveys, ``/projects/{id}/habitatcomplexitytransectmethods/``."""
 
-        return self._resource(ProjectHabitatComplexityMethodsResource)
+        return ProjectHabitatComplexityMethodsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def bleachingqc_methods(self) -> ProjectBleachingQCMethodsResource:
         """Bleaching surveys, ``/projects/{id}/bleachingquadratcollectionmethods/``."""
 
-        return self._resource(ProjectBleachingQCMethodsResource)
+        return ProjectBleachingQCMethodsResource(self._client, self.project_id)
 
-    @property
+    @cached_property
     def beltinvert_methods(self) -> ProjectBeltInvertMethodsResource:
         """Macroinvertebrate surveys, ``/projects/{id}/beltinverttransectmethods/``."""
 
-        return self._resource(ProjectBeltInvertMethodsResource)
+        return ProjectBeltInvertMethodsResource(self._client, self.project_id)
 
     # -- aggregated views -------------------------------------------------
     #
     # The denormalized observation / sample unit / sample event routes; see
     # datamermaid/resources/aggregated.py.
 
-    @property
+    @cached_property
     def beltfishes(self) -> AggregatedFamilyResource:
         """Aggregated fish belt data, ``/projects/{id}/beltfishes/``."""
 
-        return self._aggregated(BELTFISHES, AggregatedFamilyResource)
+        return AggregatedFamilyResource(self._client, self.project_id, BELTFISHES)
 
-    @property
+    @cached_property
     def benthiclits(self) -> AggregatedFamilyResource:
         """Aggregated benthic LIT data, ``/projects/{id}/benthiclits/``."""
 
-        return self._aggregated(BENTHICLITS, AggregatedFamilyResource)
+        return AggregatedFamilyResource(self._client, self.project_id, BENTHICLITS)
 
-    @property
+    @cached_property
     def benthicpits(self) -> AggregatedFamilyResource:
         """Aggregated benthic PIT data, ``/projects/{id}/benthicpits/``."""
 
-        return self._aggregated(BENTHICPITS, AggregatedFamilyResource)
+        return AggregatedFamilyResource(self._client, self.project_id, BENTHICPITS)
 
-    @property
+    @cached_property
     def benthicpqts(self) -> AggregatedFamilyResource:
         """Aggregated benthic photo quadrat data, ``/projects/{id}/benthicpqts/``."""
 
-        return self._aggregated(BENTHICPQTS, AggregatedFamilyResource)
+        return AggregatedFamilyResource(self._client, self.project_id, BENTHICPQTS)
 
-    @property
+    @cached_property
     def habitatcomplexities(self) -> AggregatedFamilyResource:
         """Aggregated habitat complexity data, ``/projects/{id}/habitatcomplexities/``."""
 
-        return self._aggregated(HABITATCOMPLEXITIES, AggregatedFamilyResource)
+        return AggregatedFamilyResource(self._client, self.project_id, HABITATCOMPLEXITIES)
 
-    @property
+    @cached_property
     def bleachingqcs(self) -> BleachingQCFamilyResource:
         """Aggregated bleaching data, ``/projects/{id}/bleachingqcs/``.
 
@@ -437,10 +410,10 @@ class ProjectContext:
         [`quadrat_benthic_percent`][datamermaid.resources.aggregated.BleachingQCFamilyResource.quadrat_benthic_percent].
         """
 
-        return self._aggregated(BLEACHINGQCS, BleachingQCFamilyResource)
+        return BleachingQCFamilyResource(self._client, self.project_id, BLEACHINGQCS)
 
-    @property
+    @cached_property
     def beltinverts(self) -> AggregatedFamilyResource:
         """Aggregated macroinvertebrate belt data, ``/projects/{id}/beltinverts/``."""
 
-        return self._aggregated(BELTINVERTS, AggregatedFamilyResource)
+        return AggregatedFamilyResource(self._client, self.project_id, BELTINVERTS)

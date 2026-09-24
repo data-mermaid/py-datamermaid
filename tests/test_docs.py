@@ -1,21 +1,17 @@
-"""The documentation site says things about the SDK that are actually true.
+"""Check all guide snippets for syntax/imports and execute selected workflows.
 
-Prose rots quietly: an attribute is renamed, a method loses an argument, and the
-example that used it keeps rendering perfectly.  So every ``python`` block in
-``docs/`` is parsed, and every attribute chain rooted at a name we can identify
-is resolved against the real classes.  The quickstart goes further and is
-executed against a mocked API, which is the only way to be sure it still runs.
-
-Nothing here touches the network.
+Runtime tests read the Markdown itself and use real SDK objects with mocked HTTP
+responses. They cover public access, API-key authentication, pagination, nested
+project data, DataFrame export and zonal batches. Other snippets receive static
+syntax/import checks only; these tests do not infer Python types or execution.
+No test touches the network, a real token cache, or a browser.
 """
 
 from __future__ import annotations
 
 import ast
-import dataclasses
+import json
 import re
-import typing
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,33 +20,15 @@ import pytest
 import respx
 
 import datamermaid
-from datamermaid import (
-    AggregatedRecord,
-    APIKeyAuth,
-    APIModel,
-    FishFamily,
-    FishGenus,
-    FishSpecies,
-    Me,
-    MermaidClient,
-    OAuth,
-    PaginatedList,
-    Project,
-    ProjectContext,
-    ProjectProfile,
-    Site,
-    SummarySampleEvent,
-    TokenSet,
-    ZonalStatsResult,
-)
-from datamermaid.batch import LazyBatch
-from datamermaid.models import BeltFishMethod
-from datamermaid.resources.aggregated import AggregatedFamilyResource
-from datamermaid.resources.base import Resource
-from datamermaid.resources.projects import ProjectsResource
-from datamermaid.resources.zonal_stats import ZonalStatsEndpoint, ZonalStatsResource
 
-from .conftest import BASE_URL, PROJECT_ID, REPO_ROOT, page
+from .conftest import (
+    BASE_URL,
+    REPO_ROOT,
+    ZONAL_STATS_URL,
+    load_fixture,
+    page,
+    project_scoped_payload,
+)
 
 DOCS = REPO_ROOT / "docs"
 MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
@@ -185,254 +163,6 @@ def test_documented_imports_exist(block):
             assert name in datamermaid.__all__, f"{name!r} is missing from __all__"
 
 
-# -- attribute chains ------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ListOf:
-    """A lazy collection (or tuple) whose items are ``item``.
-
-    ``container`` is the class an attribute on the collection itself is looked
-    up on: a [`PaginatedList`][datamermaid.pagination.PaginatedList] for a list
-    route, a [`LazyBatch`][datamermaid.batch.LazyBatch] for a zonal stats batch,
-    which answers ``fetched``, ``max_workers`` and ``to_df`` of its own.
-    """
-
-    item: type
-    container: type = PaginatedList
-
-
-def _item(model: type) -> Any:
-    """One value of ``model``, prepared enough for a chain to continue through it.
-
-    A model builds from its defaults; a [`ZonalStatsResult`][datamermaid.models.ZonalStatsResult]
-    is a plain dataclass with required fields, so it is given empty ones; anything
-    else stands for itself.
-    """
-
-    if _is_model(model):
-        return model()
-    if model is ZonalStatsResult:
-        return ZonalStatsResult(stats={}, aoi={}, source="")
-    return model
-
-
-def _model_attribute(model: type[APIModel], name: str) -> Any:
-    """What ``<a model>.<name>`` is, or ``AttributeError`` if it is nothing.
-
-    Declared fields resolve to their annotated type, so a chain can keep going
-    through a nested model; anything else that merely exists (a property, a
-    method, a ``ClassVar``) resolves to ``None``, meaning "real, but stop here".
-    """
-
-    field = {each.name: each for each in dataclasses.fields(model)}.get(name)
-    if field is None:
-        if not hasattr(model, name):
-            raise AttributeError(f"{model.__name__} has no attribute {name!r}")
-        return None
-
-    annotation = typing.get_type_hints(model)[name]
-    origin = typing.get_origin(annotation)
-    args = typing.get_args(annotation)
-    if origin is typing.Union or str(origin) == "<class 'types.UnionType'>":
-        remaining = [arg for arg in args if arg is not type(None)]
-        annotation = remaining[0] if len(remaining) == 1 else None
-    elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
-        annotation = ListOf(args[0]) if _is_model(args[0]) else None
-    else:
-        annotation = None
-
-    if _is_model(annotation):
-        return annotation()
-    return annotation if isinstance(annotation, ListOf) else None
-
-
-def _is_model(value: Any) -> bool:
-    return isinstance(value, type) and issubclass(value, APIModel)
-
-
-def _call_result(target: Any, name: str) -> Any:
-    """What calling ``target.<name>()`` yields, or ``None`` when we cannot tell.
-
-    Only the shapes the guides actually chain off are modelled; everything else
-    ends the chain, which costs a check but never invents one.
-    """
-
-    if isinstance(target, AggregatedFamilyResource):
-        return ListOf(AggregatedRecord)
-    if isinstance(target, Resource):
-        if name == "list":
-            return ListOf(target.model)
-        if name == "get":
-            return target.model()
-    if isinstance(target, MermaidClient) and name == "me":
-        return Me()
-    # `client.zonal_stats.raster(aoi, url=...)` is the endpoint's `__call__`.
-    if isinstance(target, ZonalStatsResource) and isinstance(
-        getattr(target, name, None), ZonalStatsEndpoint
-    ):
-        return _item(ZonalStatsResult)
-    if isinstance(target, ZonalStatsEndpoint):
-        if name == "stats":
-            return _item(ZonalStatsResult)
-        if name == "batch":
-            return ListOf(ZonalStatsResult, container=LazyBatch)
-    if isinstance(target, PaginatedList) and name == "to_df":
-        return None
-    return None
-
-
-class ChainResolver:
-    """Resolves an attribute chain against the objects a root name may hold."""
-
-    def __init__(self, roots: dict[str, tuple[Any, ...]]) -> None:
-        self.roots = roots
-
-    def check(self, tree: ast.AST, where: str) -> None:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and self._root_name(node) in self.roots:
-                self.resolve(node, where)
-
-    def _root_name(self, node: ast.AST) -> str | None:
-        while isinstance(node, (ast.Attribute, ast.Call, ast.Subscript)):
-            node = node.func if isinstance(node, ast.Call) else node.value
-        return node.id if isinstance(node, ast.Name) else None
-
-    def resolve(self, node: ast.AST, where: str) -> tuple[Any, ...]:
-        """Every value ``node`` may evaluate to; ``()`` means "unknown, stop"."""
-
-        if isinstance(node, ast.Name):
-            return self.roots.get(node.id, ())
-        if isinstance(node, ast.Attribute):
-            return self._attribute(node, where)
-        if isinstance(node, ast.Call):
-            return self._call(node, where)
-        if isinstance(node, ast.Subscript):
-            return self._subscript(node, where)
-        return ()
-
-    def _attribute(self, node: ast.Attribute, where: str) -> tuple[Any, ...]:
-        targets = self.resolve(node.value, where)
-        if not targets:
-            return ()
-        resolved, failures = [], []
-        for target in targets:
-            try:
-                resolved.append(self._one_attribute(target, node.attr))
-            except AttributeError as exc:
-                failures.append(str(exc))
-        assert resolved, f"{where}: {ast.unparse(node)} -> {'; '.join(failures)}"
-        return tuple(value for value in resolved if value is not None)
-
-    def _one_attribute(self, target: Any, name: str) -> Any:
-        if isinstance(target, ListOf):
-            target = target.container
-        if isinstance(target, APIModel):
-            return _model_attribute(type(target), name)
-        if not hasattr(target, name):
-            owner = target if isinstance(target, type) else type(target)
-            raise AttributeError(f"{owner.__name__} has no attribute {name!r}")
-        return getattr(target, name)
-
-    def _call(self, node: ast.Call, where: str) -> tuple[Any, ...]:
-        if isinstance(node.func, ast.Attribute):
-            targets = self.resolve(node.func.value, where)
-            self.resolve(node.func, where)  # the attribute itself must exist
-            return tuple(
-                result
-                for target in targets
-                if (result := _call_result(target, node.func.attr)) is not None
-            )
-        # `client.projects(project_id)` opens a project handle.
-        if any(isinstance(target, ProjectsResource) for target in self.resolve(node.func, where)):
-            return tuple(
-                root for root in self.roots.get("project", ()) if isinstance(root, ProjectContext)
-            )
-        return ()
-
-    def _subscript(self, node: ast.Subscript, where: str) -> tuple[Any, ...]:
-        index = node.slice
-        positional = isinstance(index, ast.Slice) or (
-            isinstance(index, ast.Constant) and isinstance(index.value, int)
-        )
-        if not positional:
-            # A string or list key means a mapping or a DataFrame, not our list.
-            return ()
-        items = []
-        for target in self.resolve(node.value, where):
-            if isinstance(target, ListOf):
-                items.append(_item(target.item))
-        return tuple(items)
-
-
-@pytest.fixture(scope="module")
-def roots():
-    """Variable names the guides bind, and every kind of value each one may hold.
-
-    A chain passes when it resolves against at least one of them, which is what
-    lets ``species`` be both a record and the lazy list it came out of.
-
-    Built in a fixture rather than at import time so nothing here is constructed
-    before the suite's isolation fixtures; ``cache=False`` and ``env=False`` keep
-    the OAuth objects off the developer's real token cache either way, since
-    ``oauth.tokens`` is one of the documented attributes this resolves.
-    """
-
-    with MermaidClient(api_key="mmd_key.secret", base_url=BASE_URL) as client:
-        oauth = OAuth(interactive=False, cache=False, env=False)
-        yield {
-            "datamermaid": (datamermaid,),
-            "client": (client,),
-            "project": (ProjectContext(client, PROJECT_ID), Project()),
-            "acanthuridae": (FishFamily(),),
-            "auth": (APIKeyAuth("mmd_key.secret"), oauth),
-            "batch": (ListOf(ZonalStatsResult, container=LazyBatch),),
-            "first_page": (ListOf(FishSpecies),),
-            "genus": (FishGenus(),),
-            "me": (Me(),),
-            "member": (ProjectProfile(),),
-            "oauth": (oauth,),
-            "result": (_item(ZonalStatsResult),),
-            "row": (AggregatedRecord(),),
-            "site": (Site(),),
-            "species": (FishSpecies(), ListOf(FishSpecies)),
-            "summary": (SummarySampleEvent(),),
-            "surgeonfish": (FishFamily(),),
-            "survey": (BeltFishMethod(),),
-            "tokens": (TokenSet("header.body.signature"),),
-        }
-
-
-@pytest.mark.parametrize("block", PYTHON_BLOCKS, ids=str)
-def test_attribute_chains_resolve(block, roots):
-    """Every documented ``client.x.y`` really is a ``client.x.y``."""
-
-    ChainResolver(roots).check(ast.parse(block.source), str(block))
-
-
-def test_the_resolver_catches_a_typo(roots):
-    """Otherwise the test above would pass no matter what the guides claimed."""
-
-    with pytest.raises(AssertionError, match="no attribute 'fish_speciez'"):
-        ChainResolver(roots).check(ast.parse("client.fish_speciez.list()"), "made up")
-
-    with pytest.raises(AssertionError, match="no attribute 'beltfishez'"):
-        ChainResolver(roots).check(ast.parse("project.beltfishez.observations()"), "made up")
-
-    with pytest.raises(AssertionError, match="no attribute 'displayname'"):
-        ChainResolver(roots).check(
-            ast.parse("client.fish_species.list()[0].displayname"), "made up"
-        )
-
-    with pytest.raises(AssertionError, match="no attribute 'rastor'"):
-        ChainResolver(roots).check(ast.parse("client.zonal_stats.rastor.stats(site)"), "made up")
-
-    with pytest.raises(AssertionError, match="no attribute 'labell'"):
-        ChainResolver(roots).check(
-            ast.parse("client.zonal_stats.raster.batch(sites, url=cog)[0].labell"), "made up"
-        )
-
-
 # -- cross-references ------------------------------------------------------
 
 
@@ -474,13 +204,21 @@ def test_cross_references_resolve(page_name, target):
 # -- the quickstart actually runs ------------------------------------------
 
 
-def quickstart_source() -> str:
-    """The first ``python`` block under the Quickstart heading of the home page."""
+def example(page_name, section, index=0):
+    """Select an actual guide block; a missing or renamed section fails the test."""
+    selected = [
+        block for block in PYTHON_BLOCKS if block.page == page_name and block.section == section
+    ]
+    assert len(selected) > index, f"Missing example: {page_name}: {section} [{index}]"
+    return selected[index]
 
-    for block in blocks(DOCS / "index.md"):
-        if block.language == "python" and block.section == "Quickstart":
-            return block.source
-    raise AssertionError("docs/index.md has no Quickstart python block")
+
+def run_example(block, namespace=None):
+    """Execute unchanged source, preserving Markdown line numbers in tracebacks."""
+    namespace = {} if namespace is None else namespace
+    source = "\n" * block.line + block.source
+    exec(compile(source, str(DOCS / block.page), "exec"), namespace)
+    return namespace
 
 
 @respx.mock
@@ -499,7 +237,7 @@ def test_quickstart_runs(capsys):
         return_value=httpx.Response(200, json=page([family]))
     )
 
-    exec(compile(quickstart_source(), "docs/index.md", "exec"), {})
+    run_example(example("index.md", "Quickstart"))
 
     assert route.called
     assert route.calls.last.request.url.params["search"] == "Acanthuridae"
@@ -509,7 +247,7 @@ def test_quickstart_runs(capsys):
 def test_quickstart_is_the_public_one():
     """The executed block is the anonymous one, not a later key-bearing example."""
 
-    source = quickstart_source()
+    source = example("index.md", "Quickstart").source
     assert "MERMAID_API_KEY" not in source
     assert "MermaidClient()" in source
 
@@ -540,8 +278,139 @@ def test_docs_dependency_group_exists():
     assert "mkdocstrings[python]" in text
 
 
-def test_mapping_fields_end_a_chain():
-    """`_model_attribute` stops at a mapping rather than guessing its values."""
+@pytest.mark.parametrize("index", [0, 1], ids=["environment-key", "explicit-key"])
+@respx.mock
+def test_api_key_examples_run(index, monkeypatch, capsys):
+    monkeypatch.setenv("MERMAID_API_KEY", "mmd_environment.secret")
+    route = respx.get(f"{BASE_URL}me/").respond(
+        200, json={"full_name": "Reef Researcher", "email": "reef@example.test"}
+    )
+    run_example(example("authentication.md", "API keys", index))
+    key = "mmd_environment.secret" if index == 0 else "mmd_<key_id>.<secret>"
+    assert route.calls.last.request.headers["Authorization"] == f"Bearer {key}"
+    expected = "Reef Researcher" if index == 0 else "reef@example.test"
+    assert capsys.readouterr().out.strip() == expected
 
-    assert _model_attribute(SummarySampleEvent, "protocols") is None
-    assert isinstance(_model_attribute(AggregatedRecord, "extra"), (Mapping, type(None)))
+
+@respx.mock
+def test_lazy_loading_example_fetches_two_pages(capsys):
+    url = f"{BASE_URL}fishspecies/"
+    records = [{"id": str(i), "display_name": f"Fish {i}"} for i in range(200)]
+    first = respx.get(url, params__eq={"limit": "100"}).respond(
+        200, json=page(records[:100], next_url=f"{url}?limit=100&offset=100", count=250)
+    )
+    second = respx.get(url, params__eq={"limit": "100", "offset": "100"}).respond(
+        200, json=page(records[100:], next_url=f"{url}?limit=100&offset=200", count=250)
+    )
+    run_example(example("data.md", "Lazy loading"))
+    assert first.call_count == second.call_count == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "<PaginatedList fetched=0 count=None lazy>",
+        "250",
+        "Fish 0",
+        "Fish 150",
+        "<PaginatedList fetched=200 count=250 lazy>",
+    ]
+
+
+@respx.mock
+def test_project_handle_and_nested_survey_examples_run(client, capsys):
+    project_id = "d5491b25-4a5f-401b-a50f-bb80fd1df78f"
+    root = f"{BASE_URL}projects/{project_id}/"
+    sites = respx.get(f"{root}sites/").respond(200, json=page([project_scoped_payload("sites")]))
+    members = respx.get(f"{root}project_profiles/").respond(
+        200, json=page([project_scoped_payload("project_profiles")])
+    )
+    namespace = run_example(example("projects.md", "The project handle"))
+    assert sites.call_count == members.call_count == 1
+    assert namespace["site"].name == project_scoped_payload("sites")["name"]
+    # The next guide section assumes an open client and the project handle above.
+    namespace["project"] = client.projects(project_id)
+    survey = respx.get(
+        f"{root}beltfishtransectmethods/ffffffff-0000-0000-0000-000000000001/"
+    ).respond(200, json=project_scoped_payload("beltfish_methods"))
+    run_example(example("projects.md", "Sample units and their observations"), namespace)
+    assert survey.call_count == 1
+    assert namespace["survey"].sample_event.sample_date is not None
+    assert namespace["survey"].observations["obs_belt_fishes"]
+    assert capsys.readouterr().out
+
+
+@respx.mock
+def test_project_dataframe_example_runs():
+    pytest.importorskip("pandas")
+    route = respx.get(
+        f"{BASE_URL}projects/d5491b25-4a5f-401b-a50f-bb80fd1df78f/beltfishes/obstransectbeltfishes/"
+    ).respond(
+        200,
+        json=page(
+            [
+                {
+                    "site_name": "Reef A",
+                    "sample_date": "2025-01-02",
+                    "fish_taxon": "Acanthurus",
+                    "biomass_kgha": 12.5,
+                }
+            ]
+        ),
+    )
+    namespace = run_example(example("index.md", "From a project id to a DataFrame"))
+    assert route.calls.last.request.url.params["sample_date_after"] == "2018-01-01"
+    assert namespace["observations"]["biomass_kgha"].tolist() == [12.5]
+    assert namespace["observations"]["site_name"].tolist() == ["Reef A"]
+
+
+@respx.mock
+def test_zonal_batch_and_exports_run(client):
+    pytest.importorskip("pandas")
+    points = [{"type": "Point", "coordinates": [178.0 + i, -18.1]} for i in range(2)]
+    respx.get(f"{BASE_URL}projects/reef-project/sites/").respond(
+        200,
+        json=page(
+            [
+                {"id": "a", "location": points[0]},
+                {"id": "missing-location"},
+                {"id": "b", "location": points[1]},
+            ]
+        ),
+    )
+    route = respx.post(f"{ZONAL_STATS_URL}raster").respond(
+        200, json=load_fixture("zonal_stats_responses")["raster"]
+    )
+    namespace = run_example(
+        example("zonal_stats.md", "Many areas at once"),
+        {"client": client, "project_id": "reef-project"},
+    )
+    assert route.call_count == 2
+    for index in (0, 1):
+        run_example(example("zonal_stats.md", "Wide rows and long rows", index), namespace)
+    assert namespace["frame"]["label"].tolist() == ["a", "b"]
+    assert namespace["frame"]["band_1_mean"].tolist() == [12.3, 12.3]
+    assert set(namespace["long_frame"]["label"]) == {"a", "b"}
+    assert route.call_count == 2  # Exports read completed results.
+    for call in route.calls:
+        body = json.loads(call.request.content)
+        assert body["aoi"] in [{**point, "radius": 500} for point in points]
+        assert body["stats"] == ["mean", "count"]
+        assert body["url"] == "https://example.test/depth.tif"
+        assert "Authorization" not in call.request.headers
+
+
+@respx.mock
+def test_zonal_partial_failure_example_runs(client, capsys):
+    sites = [
+        project_scoped_payload("sites"),
+        {"id": "missing-location"},
+    ]
+    respx.get(f"{BASE_URL}projects/reef-project/sites/").respond(200, json=page(sites))
+    route = respx.post(f"{ZONAL_STATS_URL}raster").respond(
+        200, json=load_fixture("zonal_stats_responses")["raster"]
+    )
+    namespace = run_example(
+        example("zonal_stats.md", "When one area fails"),
+        {"client": client, "sites": client.projects("reef-project").sites.list()},
+    )
+    assert route.call_count == 1
+    assert namespace["batch"][0].label == sites[0]["id"]
+    assert isinstance(namespace["batch"][1].error, ValueError)
+    assert "failed:" in capsys.readouterr().out

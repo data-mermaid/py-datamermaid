@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from functools import cached_property
 
 import httpx
 import pytest
@@ -25,12 +26,12 @@ from datamermaid import (
 from datamermaid.client import resolve_zonal_stats_url
 from datamermaid.pagination import to_dataframe
 from datamermaid.resources import (
-    RasterStacStatsEndpoint,
-    RasterStatsEndpoint,
-    VectorStacStatsEndpoint,
-    VectorStatsEndpoint,
-    ZonalStatsEndpoint,
-    ZonalStatsResource,
+    BaseZonalStats,
+    RasterStacStats,
+    RasterStats,
+    VectorStacStats,
+    VectorStats,
+    ZonalStats,
 )
 
 from .conftest import ZONAL_STATS_URL, load_fixture, project_scoped_payload
@@ -63,15 +64,13 @@ def body_of(route):
 def payload_for(endpoint_class):
     """A response fixture with the keys that kind of endpoint answers with."""
 
-    return zonal_payload("vector" if issubclass(endpoint_class, VectorStatsEndpoint) else "raster")
+    return zonal_payload("vector" if issubclass(endpoint_class, VectorStats) else "raster")
 
 
 def required_options(endpoint_class):
     """The keyword arguments a route needs on top of ``url``."""
 
-    return (
-        {"columns": ["depth", "slope"]} if issubclass(endpoint_class, VectorStatsEndpoint) else {}
-    )
+    return {"columns": ["depth", "slope"]} if issubclass(endpoint_class, VectorStats) else {}
 
 
 def mock_endpoint(endpoint_class):
@@ -116,18 +115,18 @@ def test_zonal_stats_url_is_independent_of_the_base_url():
 
 
 def test_zonal_stats_resource_is_cached(client):
-    assert isinstance(client.zonal_stats, ZonalStatsResource)
+    assert isinstance(client.zonal_stats, ZonalStats)
     assert client.zonal_stats is client.zonal_stats
     assert client.zonal_stats.raster is client.zonal_stats.raster
-    assert isinstance(client.zonal_stats.raster, RasterStatsEndpoint)
-    assert isinstance(client.zonal_stats.raster, ZonalStatsEndpoint)
+    assert isinstance(client.zonal_stats.raster, RasterStats)
+    assert isinstance(client.zonal_stats.raster, BaseZonalStats)
 
 
 def test_resource_path_is_the_absolute_service_root(client):
     assert client.zonal_stats.path == ZONAL_STATS_URL
     assert client.zonal_stats.raster.url == RASTER_URL
     assert not client.zonal_stats.raster.url.endswith("/")
-    assert repr(client.zonal_stats.raster) == f"RasterStatsEndpoint(url={RASTER_URL!r})"
+    assert repr(client.zonal_stats.raster) == f"RasterStats(url={RASTER_URL!r})"
 
 
 def test_endpoint_follows_a_custom_service_url():
@@ -143,15 +142,15 @@ def test_the_registry_lists_every_endpoint_on_the_resource(client):
 
     exposed = {
         name: type(getattr(client.zonal_stats, name))
-        for name, attribute in vars(ZonalStatsResource).items()
-        if isinstance(attribute, property)
+        for name, attribute in vars(ZonalStats).items()
+        if isinstance(attribute, (property, cached_property))
     }
     assert exposed == dict(ZONAL_STATS_ENDPOINTS)
     assert dict(ZONAL_STATS_ENDPOINTS) == {
-        "raster": RasterStatsEndpoint,
-        "raster_stac": RasterStacStatsEndpoint,
-        "vector": VectorStatsEndpoint,
-        "vector_stac": VectorStacStatsEndpoint,
+        "raster": RasterStats,
+        "raster_stac": RasterStacStats,
+        "vector": VectorStats,
+        "vector_stac": VectorStacStats,
     }
 
 
@@ -159,7 +158,7 @@ def test_the_registry_lists_every_endpoint_on_the_resource(client):
 def test_every_endpoint_is_a_cached_property_on_its_route(client, name, endpoint_class):
     endpoint = getattr(client.zonal_stats, name)
     assert isinstance(endpoint, endpoint_class)
-    assert isinstance(endpoint, ZonalStatsEndpoint)
+    assert isinstance(endpoint, BaseZonalStats)
     assert endpoint is getattr(client.zonal_stats, name)
     assert endpoint.route == endpoint_class.route
     assert endpoint.url == f"{ZONAL_STATS_URL}{endpoint_class.route}"
@@ -839,8 +838,8 @@ def test_to_records_is_long():
         {"band_1": {"mean": 12.3, "count": 40}}, aoi=POINT, source=COG, label="site-1"
     )
     assert result.to_records() == [
-        {"label": "site-1", "band": "band_1", "stat": "mean", "value": 12.3},
-        {"label": "site-1", "band": "band_1", "stat": "count", "value": 40},
+        {"label": "site-1", "source": COG, "band": "band_1", "stat": "mean", "value": 12.3},
+        {"label": "site-1", "source": COG, "band": "band_1", "stat": "count", "value": 40},
     ]
 
 
@@ -943,3 +942,18 @@ def test_a_persistent_429_raises_the_gateway_message():
     ):
         client.zonal_stats.raster.stats(POINT, url=COG)
     assert route.call_count == 2
+
+
+@pytest.mark.parametrize("stac", [None, {"item_id": "item-1", "asset": "data"}])
+def test_long_records_keep_sources_distinct_for_the_same_site(stac):
+    sources = ["https://data.test/a.tif", "https://data.test/b.tif"]
+    results = [
+        ZonalStatsResult(
+            stats={"band_1": {"mean": 12.3}}, aoi=POINT, source=source, label="site-1", stac=stac
+        )
+        for source in sources
+    ]
+    rows = [row for result in results for row in result.to_records()]
+    assert [row["source"] for row in rows] == sources
+    assert all(row["label"] == "site-1" for row in rows)
+    assert all(row.get("stac") == stac for row in rows)
