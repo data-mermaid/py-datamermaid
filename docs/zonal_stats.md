@@ -192,14 +192,14 @@ does not read the geometry column from the file's metadata. Without
 
 For a runnable example with actual SST data and MERMAID sites, see
 [`zonal_stats_sst.py`](https://github.com/data-mermaid/py-datamermaid/blob/main/examples/zonal_stats_sst.py).
-It searches the [MERMAID catalog](https://mermaid.prescient.earth/stac) for
-`daily_sst` items, reads their `data` asset, and streams each site–day mean in
+It reads `daily_sst` through [`client.covariates`](covariates.md) and streams each site–day mean in
 Celsius to JSONL. See the [example instructions](examples.md#sea-surface-temperature-and-sites).
 
 ## STAC searches and large jobs
 
 Pass a [pystac-client ItemSearch](https://pystac-client.readthedocs.io/en/latest/usage.html#itemsearch)
-as `search=`, or supply `sources=` with an iterable of STAC Items, item dictionaries,
+or a [`CovariateSearch`][datamermaid.resources.covariates.CovariateSearch] from
+[`client.covariates`](covariates.md) as `search=`, or supply `sources=` with an iterable of STAC Items, item dictionaries,
 or URLs. Supply exactly one of `url`, `sources`, or `search`. No PySTAC dependency
 is required by the SDK; the adapter uses the search's `items_as_dicts()` method.
 Strings retain the selected endpoint's URL meaning: item JSON URLs for STAC
@@ -208,7 +208,8 @@ endpoints, data URLs for ordinary raster/vector endpoints.
 A search expands to one calculation per AOI per item. It does not mosaic,
 merge overlapping scenes, or filter pairs by footprint. Choose `asset=` explicitly
 on the STAC endpoints to select the same asset key in each item; otherwise the
-first asset is selected. Item assets are resolved to data URLs and sent to the
+first asset with the `data` role is selected, or the first asset if none has
+that role. Item assets are resolved to data URLs and sent to the
 ordinary raster/vector endpoint, preserving signed URLs and avoiding a second
 fetch of the item JSON. The statistics service must be able to read those URLs;
 credentials from the STAC search client are not forwarded. Vector STAC searches

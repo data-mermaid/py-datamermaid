@@ -20,6 +20,7 @@ from .exceptions import MermaidConnectionError, parse_retry_after, raise_for_sta
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .models import Me
+    from .resources.covariates import Covariates
     from .resources.projects import ProjectsResource
     from .resources.reference import (
         BenthicAttributesResource,
@@ -39,7 +40,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "BASE_URL_ENV_VAR",
+    "COVARIATES_URL_ENV_VAR",
     "DEFAULT_BASE_URL",
+    "DEFAULT_COVARIATES_URL",
     "DEFAULT_ZONAL_STATS_URL",
     "DEV_BASE_URL",
     "ZONAL_STATS_URL_ENV_VAR",
@@ -52,6 +55,9 @@ BASE_URL_ENV_VAR = "MERMAID_API_URL"
 
 DEFAULT_ZONAL_STATS_URL = "https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/"
 ZONAL_STATS_URL_ENV_VAR = "MERMAID_ZONAL_STATS_URL"
+
+DEFAULT_COVARIATES_URL = "https://mermaid.prescient.earth/stac/"
+COVARIATES_URL_ENV_VAR = "MERMAID_COVARIATES_URL"
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
@@ -96,6 +102,13 @@ def resolve_zonal_stats_url(url: str | None = None) -> str:
     return candidate if candidate.endswith("/") else f"{candidate}/"
 
 
+def resolve_covariates_url(url: str | None = None) -> str:
+    """Resolve the covariates STAC API root: argument, then env var, then default."""
+
+    candidate = url or os.environ.get(COVARIATES_URL_ENV_VAR, "").strip() or DEFAULT_COVARIATES_URL
+    return candidate if candidate.endswith("/") else f"{candidate}/"
+
+
 class MermaidClient:
     """Synchronous client for the MERMAID API.
 
@@ -132,12 +145,17 @@ class MermaidClient:
             ``MERMAID_ZONAL_STATS_URL``, then to
             [`DEFAULT_ZONAL_STATS_URL`][datamermaid.client.DEFAULT_ZONAL_STATS_URL].  A
             trailing slash is added if missing.
+        covariates_url: Root of the covariates STAC API.  Defaults to
+            ``MERMAID_COVARIATES_URL``, then to
+            [`DEFAULT_COVARIATES_URL`][datamermaid.client.DEFAULT_COVARIATES_URL].  A
+            trailing slash is added if missing.
         timeout: Seconds, or an ``httpx.Timeout`` for per-phase control.
         max_retries: Extra attempts after a 429 or 5xx.  ``0`` disables retrying.
         backoff_factor: Base delay of the exponential backoff, in seconds.
             A ``Retry-After`` header wins over it.
         headers: Extra headers sent with every request to the MERMAID API.
-            Requests to the Zonal Stats service carry none of them.
+            Requests to the Zonal Stats service and the covariates catalog
+            carry none of them.
         user_agent: Overrides [`default_user_agent`][..default_user_agent].
         transport: An ``httpx`` transport, mainly for tests.
 
@@ -149,6 +167,7 @@ class MermaidClient:
         auth: The credential provider in use.
         base_url: The resolved API root, always ending in ``/``.
         zonal_stats_url: The resolved Zonal Stats service root, always ending in ``/``.
+        covariates_url: The resolved covariates STAC API root, always ending in ``/``.
         max_retries: Extra attempts made after a retryable status code.
         backoff_factor: Base delay of the exponential backoff, in seconds.
 
@@ -178,6 +197,7 @@ class MermaidClient:
         api_key: str | None = None,
         base_url: str | None = None,
         zonal_stats_url: str | None = None,
+        covariates_url: str | None = None,
         timeout: float | httpx.Timeout = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
@@ -198,6 +218,7 @@ class MermaidClient:
         self.auth = resolve_auth(auth, api_key)
         self.base_url = resolve_base_url(base_url)
         self.zonal_stats_url = resolve_zonal_stats_url(zonal_stats_url)
+        self.covariates_url = resolve_covariates_url(covariates_url)
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
 
@@ -370,6 +391,18 @@ class MermaidClient:
         from .resources.zonal_stats import ZonalStats
 
         return ZonalStats(self)
+
+    @cached_property
+    def covariates(self) -> Covariates:
+        """The covariates catalog, a public STAC API (``client.covariates.collections()``).
+
+        Requests to it carry no MERMAID credentials.  See
+        [`Covariates`][datamermaid.resources.covariates.Covariates].
+        """
+
+        from .resources.covariates import Covariates
+
+        return Covariates(self)
 
     @overload
     def choices(self) -> dict[str, list[dict[str, Any]]]: ...

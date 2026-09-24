@@ -37,3 +37,7 @@ they are used.
 ## Zonal statistics
 
 ::: datamermaid.resources.zonal_stats
+
+## Covariates
+
+::: datamermaid.resources.covariates

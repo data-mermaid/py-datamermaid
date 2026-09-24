@@ -99,6 +99,7 @@ def test_pages_are_discovered():
 
     assert PAGE_IDS == [
         "authentication.md",
+        "covariates.md",
         "data.md",
         "examples.md",
         "index.md",

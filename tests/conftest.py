@@ -15,6 +15,7 @@ from datamermaid.auth.config import DEFAULT_AUTH0_DOMAIN
 
 BASE_URL = "https://api.datamermaid.org/v1/"
 ZONAL_STATS_URL = "https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/"
+COVARIATES_URL = "https://mermaid.prescient.earth/stac/"
 TOKEN_URL = f"https://{DEFAULT_AUTH0_DOMAIN}/oauth/token"
 DEVICE_CODE_URL = f"https://{DEFAULT_AUTH0_DOMAIN}/oauth/device/code"
 AUTHORIZE_URL = f"https://{DEFAULT_AUTH0_DOMAIN}/authorize"
@@ -94,6 +95,7 @@ AMBIENT_ENV_VARS = (
     "MERMAID_API_KEY",
     "MERMAID_API_URL",
     "MERMAID_ZONAL_STATS_URL",
+    "MERMAID_COVARIATES_URL",
     "MERMAID_AUTH0_DOMAIN",
     "MERMAID_CLIENT_ID",
     "MERMAID_AUDIENCE",

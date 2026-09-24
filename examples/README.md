@@ -96,8 +96,9 @@ uv run examples/zonal_stats_sst.py --project-id <uuid> \
   --output sst-results.jsonl
 ```
 
-The example searches the [MERMAID STAC catalog](https://mermaid.prescient.earth/stac)
-for NOAA CoralTemp (`daily_sst`, asset `data`), prepares one mean calculation
+The example reads NOAA CoralTemp (`daily_sst`) from the
+[MERMAID covariates catalog](https://mermaid.prescient.earth/stac) through
+`client.covariates`, prepares one mean calculation
 per site and day, and streams success and failure rows to JSONL. It defaults to
 five sites, three daily items, a 500 m radius, and four workers. Use `--stac-url`
 to override the catalog URL; `--project-id` defaults to `$MERMAID_PROJECT_ID`,

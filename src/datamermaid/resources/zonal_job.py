@@ -23,15 +23,15 @@ class StacSearchLike(Protocol):
     def items_as_dicts(self) -> Iterable[Mapping[str, Any]]: ...
 
 
-SourceInput: TypeAlias = str | Mapping[str, Any] | StacItemLike
-
-
 @dataclass(frozen=True)
 class ZonalSource:
     """A resolved URL and optional STAC provenance."""
 
     url: str
     stac: Mapping[str, Any] | None = None
+
+
+SourceInput: TypeAlias = str | Mapping[str, Any] | StacItemLike | ZonalSource
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,71 @@ class ZonalTask:
     aoi: Any
     label: Any
     source: ZonalSource
+
+
+def default_asset(assets: Mapping[str, Any]) -> str | None:
+    """The key of the first asset with the ``data`` role, else the first key.
+
+    Many items list a thumbnail before their data, so taking the first key
+    alone could compute statistics over a PNG.
+    """
+    for key, entry in assets.items():
+        roles = entry.get("roles") if isinstance(entry, Mapping) else None
+        if isinstance(roles, Sequence) and not isinstance(roles, str) and "data" in roles:
+            return str(key)
+    return next(iter(assets), None)
+
+
+def source_from_item(item: Any, asset: str | None) -> ZonalSource:
+    """Resolve one STAC Item (mapping or ``to_dict()`` object) to its asset URL."""
+    if not isinstance(item, Mapping):
+        to_dict = getattr(item, "to_dict", None)
+        if not callable(to_dict):
+            raise TypeError("each source must be a URL, STAC Item, or item mapping")
+        item = to_dict()
+    if not isinstance(item, Mapping):
+        raise TypeError("a STAC Item's to_dict() must return a mapping")
+    assets = item.get("assets", {})
+    if not isinstance(assets, Mapping):
+        raise TypeError("STAC assets must be a mapping")
+    key = asset if asset is not None else default_asset(assets)
+    if key is None or key not in assets:
+        raise ValueError(f"STAC item {item.get('id')!r} has no asset {key!r}")
+    if not isinstance(assets[key], Mapping):
+        raise TypeError("STAC asset entries must be mappings")
+    href = assets[key].get("href")
+    if not isinstance(href, str) or not href.strip():
+        raise ValueError(f"STAC item {item.get('id')!r} has no asset href")
+    links = item.get("links", [])
+    if isinstance(links, (str, bytes)) or not isinstance(links, Sequence):
+        raise TypeError("STAC links must be a sequence of mappings")
+    base = ""
+    for link in links:
+        if not isinstance(link, Mapping):
+            raise TypeError("STAC links must contain mappings")
+        if link.get("rel") == "self":
+            self_href = link.get("href")
+            if not isinstance(self_href, str) or not self_href.strip():
+                raise ValueError("STAC self links must have a non-empty href")
+            base = self_href
+            break
+    href = urljoin(base, href)
+    if not urlparse(href).scheme:
+        raise ValueError("Relative asset URLs require an absolute STAC self link")
+    properties = item.get("properties", {})
+    if not isinstance(properties, Mapping):
+        raise TypeError("STAC properties must be a mapping")
+    return ZonalSource(
+        href,
+        {
+            "item_id": item.get("id"),
+            "collection": item.get("collection"),
+            "datetime": properties.get("datetime"),
+            "start_datetime": properties.get("start_datetime"),
+            "end_datetime": properties.get("end_datetime"),
+            "asset": key,
+        },
+    )
 
 
 def resolve_sources(
@@ -61,61 +126,15 @@ def resolve_sources(
         raise TypeError("sources must be an iterable of URLs or STAC Items")
     resolved = []
     for item in sources:
+        if isinstance(item, ZonalSource):
+            resolved.append(item)
+            continue
         if isinstance(item, str):
             if not item.strip():
                 raise ValueError("source URL must not be empty")
             resolved.append(ZonalSource(item))
             continue
-        if not isinstance(item, Mapping):
-            to_dict = getattr(item, "to_dict", None)
-            if not callable(to_dict):
-                raise TypeError("each source must be a URL, STAC Item, or item mapping")
-            item = to_dict()
-        if not isinstance(item, Mapping):
-            raise TypeError("a STAC Item's to_dict() must return a mapping")
-        assets = item.get("assets", {})
-        if not isinstance(assets, Mapping):
-            raise TypeError("STAC assets must be a mapping")
-        key = asset if asset is not None else next(iter(assets), None)
-        if key is None or key not in assets:
-            raise ValueError(f"STAC item {item.get('id')!r} has no asset {key!r}")
-        if not isinstance(assets[key], Mapping):
-            raise TypeError("STAC asset entries must be mappings")
-        href = assets[key].get("href")
-        if not isinstance(href, str) or not href.strip():
-            raise ValueError(f"STAC item {item.get('id')!r} has no asset href")
-        links = item.get("links", [])
-        if isinstance(links, (str, bytes)) or not isinstance(links, Sequence):
-            raise TypeError("STAC links must be a sequence of mappings")
-        base = ""
-        for link in links:
-            if not isinstance(link, Mapping):
-                raise TypeError("STAC links must contain mappings")
-            if link.get("rel") == "self":
-                self_href = link.get("href")
-                if not isinstance(self_href, str) or not self_href.strip():
-                    raise ValueError("STAC self links must have a non-empty href")
-                base = self_href
-                break
-        href = urljoin(base, href)
-        if not urlparse(href).scheme:
-            raise ValueError("Relative asset URLs require an absolute STAC self link")
-        properties = item.get("properties", {})
-        if not isinstance(properties, Mapping):
-            raise TypeError("STAC properties must be a mapping")
-        resolved.append(
-            ZonalSource(
-                href,
-                {
-                    "item_id": item.get("id"),
-                    "collection": item.get("collection"),
-                    "datetime": properties.get("datetime"),
-                    "start_datetime": properties.get("start_datetime"),
-                    "end_datetime": properties.get("end_datetime"),
-                    "asset": key,
-                },
-            )
-        )
+        resolved.append(source_from_item(item, asset))
     return tuple(resolved)
 
 

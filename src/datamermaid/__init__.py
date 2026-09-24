@@ -44,7 +44,9 @@ from .auth import (
 from .batch import Batch, BatchFailure, BatchStream
 from .client import (
     BASE_URL_ENV_VAR,
+    COVARIATES_URL_ENV_VAR,
     DEFAULT_BASE_URL,
+    DEFAULT_COVARIATES_URL,
     DEFAULT_ZONAL_STATS_URL,
     DEV_BASE_URL,
     ZONAL_STATS_URL_ENV_VAR,
@@ -107,6 +109,11 @@ from .resources import (
     AggregatedViewFamily,
     BaseZonalStats,
     BleachingQCFamilyResource,
+    CovariateAsset,
+    CovariateCollection,
+    CovariateItem,
+    Covariates,
+    CovariateSearch,
     ProjectContext,
     RasterStacStats,
     RasterStats,
@@ -128,7 +135,9 @@ from .resources.zonal_job import (
 
 __all__ = [
     "BASE_URL_ENV_VAR",
+    "COVARIATES_URL_ENV_VAR",
     "DEFAULT_BASE_URL",
+    "DEFAULT_COVARIATES_URL",
     "DEFAULT_ZONAL_STATS_URL",
     "DEV_BASE_URL",
     "ZONAL_STATS_ENDPOINTS",
@@ -157,6 +166,11 @@ __all__ = [
     "BenthicTransect",
     "BleachingQCFamilyResource",
     "BleachingQuadratCollectionMethod",
+    "CovariateAsset",
+    "CovariateCollection",
+    "CovariateItem",
+    "CovariateSearch",
+    "Covariates",
     "FishBeltTransect",
     "FishFamily",
     "FishGenus",

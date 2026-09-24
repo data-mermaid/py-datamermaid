@@ -322,6 +322,26 @@ and bounds pending requests. Keep the client open while consuming results.
 The [large jobs guide](https://data-mermaid.github.io/py-datamermaid/zonal_stats/#stac-searches-and-large-jobs)
 shows incremental JSONL output and failure handling.
 
+## Covariates
+
+`client.covariates` lists the datasets in the public
+[MERMAID covariates catalog](https://mermaid.prescient.earth/stac), such as daily
+sea surface temperature, bleaching heat stress and market gravity, and computes
+zonal statistics from them:
+
+```python
+client.covariates.search_collections("bleaching")  # by id or title
+sst = client.covariates.collection("daily_sst")
+print(sst.describe())  # kind, time range, band units and scale, licence
+
+batch = sst.zonal_stats(sites, datetime="2026-05", stats=["mean"], radius=500)
+frame = batch.to_df()  # one row per site and day
+```
+
+The collection chooses the raster or vector route, the `data` asset and, for
+GeoParquet, the geometry column. See the
+[covariates guide](https://data-mermaid.github.io/py-datamermaid/covariates/).
+
 ## Pagination
 
 `client.projects.list()` returns a `PaginatedList`. It issues no request until

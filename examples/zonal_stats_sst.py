@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["datamermaid", "pystac-client>=0.9,<1"]
+# dependencies = ["datamermaid"]
 #
 # [tool.uv.sources]
 # datamermaid = { path = "..", editable = true }
@@ -10,7 +10,7 @@
     export MERMAID_API_KEY='mmd_<key_id>.<secret>'
     uv run examples/zonal_stats_sst.py --project-id <uuid>
 
-Reads NOAA CoralTemp from the MERMAID STAC catalog, then writes one JSONL row
+Reads NOAA CoralTemp from the MERMAID covariates catalog, then writes one JSONL row
 per site and daily item. Defaults to five sites and three items from May
 2026. Only reading the project's sites needs MERMAID credentials. A cached
 login from ``uv run examples/oauth_login.py`` also works.
@@ -24,9 +24,6 @@ import os
 import sys
 from pathlib import Path
 
-from pystac_client import Client as StacClient
-from pystac_client.exceptions import APIError
-
 from datamermaid import (
     AuthenticationError,
     AuthFlowError,
@@ -38,7 +35,6 @@ from datamermaid import (
 # Verified public MERMAID catalog. Override if the catalog moves.
 STAC_URL = "https://mermaid.prescient.earth/stac"
 COLLECTION = "daily_sst"
-ASSET = "data"
 
 
 def positive_int(text: str) -> int:
@@ -91,7 +87,7 @@ def main() -> int:
     args = parse_args()
     try:
         # Keep the HTTP client open until the stream has been fully consumed.
-        with MermaidClient() as client:
+        with MermaidClient(covariates_url=args.stac_url) as client:
             if args.project_id:
                 project = client.projects.get(args.project_id)
             else:
@@ -110,27 +106,19 @@ def main() -> int:
             site_names = {site.id: site.name for site in located}
             print(f"Project: {project.name}; {len(located)} located sites")
 
-            catalog = StacClient.open(args.stac_url)
-            search = catalog.search(
-                collections=[COLLECTION],
-                datetime=args.datetime,
-                sortby="+datetime",
-                max_items=args.max_items,  # Total cap, not merely the page size.
-            )
             # Each SST item covers the globe. Pair each selected day with each
-            # site; no per-site STAC search is needed.
-            job = client.zonal_stats.raster_stac.prepare(
+            # site; no per-site STAC search is needed. The collection picks the
+            # raster route and the item's `data` asset.
+            sst = client.covariates.collection(COLLECTION)
+            job = sst.prepare_zonal_stats(
                 located,
-                search=search,
-                asset=ASSET,
+                datetime=args.datetime,
+                max_items=args.max_items,  # Total cap, not merely the page size.
                 bands=[1],
                 stats=["mean"],
                 radius=args.radius,
             )
             print(f"{len(job.sources)} daily items; {job.request_count} site-day calculations")
-            if not job.request_count:
-                print("No SST items matched. Try another --datetime interval.")
-                return 0
 
             failed = 0
             with (
@@ -160,7 +148,7 @@ def main() -> int:
         print(f"Could not authenticate: {error}", file=sys.stderr)
         print("Export MERMAID_API_KEY or run: uv run examples/oauth_login.py", file=sys.stderr)
         return 1
-    except (MermaidError, APIError, OSError, ValueError) as error:
+    except (MermaidError, OSError, ValueError) as error:
         print(f"Could not complete the SST example: {error}", file=sys.stderr)
         return 1
 

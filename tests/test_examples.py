@@ -129,22 +129,14 @@ def test_example_is_indexed(path):
 
 def test_sst_authentication_failure_returns_nonzero(monkeypatch, capsys):
     import importlib.util
-    from types import ModuleType
 
     from datamermaid import AuthenticationError
 
-    # The failure happens before catalog access, so no pystac installation is needed.
-    stac = ModuleType("pystac_client")
-    stac.Client = object
-    exceptions = ModuleType("pystac_client.exceptions")
-    exceptions.APIError = type("APIError", (Exception,), {})
-    monkeypatch.setitem(sys.modules, "pystac_client", stac)
-    monkeypatch.setitem(sys.modules, "pystac_client.exceptions", exceptions)
     spec = importlib.util.spec_from_file_location("sst_example", EXAMPLES / "zonal_stats_sst.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    def rejected_client():
+    def rejected_client(**kwargs):
         raise AuthenticationError("invalid credentials", status_code=401)
 
     monkeypatch.setattr(module, "MermaidClient", rejected_client)

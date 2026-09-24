@@ -103,6 +103,7 @@ nav:
       - Working with data: data.md
       - Project data: projects.md
       - Zonal statistics: zonal_stats.md
+      - Covariates: covariates.md
       - Examples: examples.md
   - API reference:
       - Overview: reference/index.md
