@@ -383,6 +383,46 @@ for item in batch:
 The row keeps its `label`, `source`, and STAC metadata when available; statistic
 columns are empty. A partly failing batch still produces a table.
 
+### Caching results between batches
+
+Batches keep each successful response in `client.zonal_stats.cache`, an
+in-memory `ResponseCache` shared by every batch on the client. A later batch
+reads matching requests from it and does not call the service again. Failed
+requests are not stored, so if you run a batch again, only the failed and new
+requests go to the service:
+
+```python
+batch = client.zonal_stats.raster.batch(
+    sites, url="https://example.test/depth.tif", errors="return"
+)
+# Some requests failed. Run the batch again: only the failures are sent.
+batch = client.zonal_stats.raster.batch(sites, url="https://example.test/depth.tif")
+```
+
+The key is a hash of the route and the full request body: the AOI (after
+`radius` is applied), the source URL, `stats`, and the route options. If any of
+these change, the request is sent again. Labels are not part of the key, so a
+cached result gets the label of the batch that reads it.
+
+The `cache=` argument controls this:
+
+| Value                  | Behavior                                                   |
+| ---------------------- | ---------------------------------------------------------- |
+| `True` (the default)   | Use `client.zonal_stats.cache`.                            |
+| `False` or `None`      | Send every request and store nothing.                      |
+| A mutable mapping      | Use that mapping, for example a `dict` or `diskcache.Cache`. |
+
+The default cache holds 10,000 responses and drops the least recently used one
+when it is full. It lasts as long as the client. To keep results across
+sessions, pass a mapping that stores to disk, such as
+`diskcache.Cache("zonal-cache")`.
+
+The key covers the source URL, not the data at that URL. If a file or STAC
+Item is replaced at the same URL, call `client.zonal_stats.cache.clear()` or
+pass `cache=False`. Two workers that request the same uncached body at the same
+time both send it. Only `batch` uses the cache: `stats` and `prepare().run()`
+always send their requests.
+
 ### Uniform batch failures and inputs
 
 Every zonal batch now exposes `ZonalTask` inputs, including a single `url=` batch.

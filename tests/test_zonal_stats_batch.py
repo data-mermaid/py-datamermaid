@@ -10,7 +10,12 @@ import pytest
 import respx
 
 from datamermaid import Batch, MermaidAPIError, MermaidClient, Site, Stat, WeightingMethod
-from datamermaid.resources.zonal_stats import BatchItem, _expand_aois, _resolve_labels
+from datamermaid.resources.zonal_stats import (
+    BatchItem,
+    ResponseCache,
+    _expand_aois,
+    _resolve_labels,
+)
 
 from .conftest import ZONAL_STATS_URL, load_fixture
 
@@ -396,6 +401,130 @@ def test_batch_inputs_are_items(client):
     assert [(task.aoi, task.label, task.source.url) for task in batch.inputs] == [
         (POINTS[0], "only", COG)
     ]
+
+
+# -- cache ------------------------------------------------------------------
+
+
+@respx.mock
+def test_a_cached_batch_is_answered_without_requests(client):
+    route = respx.post(RASTER_URL).mock(return_value=ok())
+    cache: dict = {}
+
+    first = client.zonal_stats.raster.batch(POINTS, url=COG, cache=cache).results()
+    second = client.zonal_stats.raster.batch(POINTS, url=COG, cache=cache).results()
+
+    assert route.call_count == 3
+    assert len(cache) == 3
+    assert [result.stats for result in second] == [result.stats for result in first]
+
+
+@respx.mock
+def test_cached_results_take_the_labels_of_the_new_batch(client):
+    respx.post(RASTER_URL).mock(return_value=ok())
+    cache: dict = {}
+
+    client.zonal_stats.raster.batch(POINTS, url=COG, labels=["a", "b", "c"], cache=cache)
+    results = client.zonal_stats.raster.batch(
+        POINTS, url=COG, labels=["x", "y", "z"], cache=cache
+    ).results()
+
+    assert [result.label for result in results] == ["x", "y", "z"]
+
+
+@respx.mock
+def test_a_rerun_only_sends_the_requests_that_failed(client):
+    failing = {"on": True}
+    route = respx.post(RASTER_URL).mock(
+        side_effect=lambda request: (
+            httpx.Response(400, json=zonal_payload("raster_error"))
+            if failing["on"] and json.loads(request.content)["aoi"] == POINTS[1]
+            else ok()
+        )
+    )
+    cache: dict = {}
+
+    first = client.zonal_stats.raster.batch(POINTS, url=COG, errors="return", cache=cache)
+    assert isinstance(first.results()[1].error, MermaidAPIError)
+    assert len(cache) == 2
+
+    failing["on"] = False
+    sent_before = route.call_count
+    second = client.zonal_stats.raster.batch(POINTS, url=COG, cache=cache).results()
+
+    resent = [json.loads(call.request.content)["aoi"] for call in route.calls[sent_before:]]
+    assert resent == [POINTS[1]]
+    assert [result.label for result in second] == [0, 1, 2]
+
+
+@respx.mock
+def test_different_options_do_not_share_a_cache_entry(client):
+    route = respx.post(RASTER_URL).mock(return_value=ok())
+    cache: dict = {}
+
+    client.zonal_stats.raster.batch(POINTS[:1], url=COG, stats=["mean"], cache=cache)
+    client.zonal_stats.raster.batch(POINTS[:1], url=COG, stats=["max"], cache=cache)
+    client.zonal_stats.raster.batch(POINTS[:1], url=COG, stats=["mean"], radius=100, cache=cache)
+
+    assert route.call_count == 3
+    assert len(cache) == 3
+
+
+@respx.mock
+@pytest.mark.parametrize("disabled", [False, None])
+def test_cache_false_or_none_sends_every_request(client, disabled):
+    route = respx.post(RASTER_URL).mock(return_value=ok())
+
+    client.zonal_stats.raster.batch(POINTS, url=COG, cache=disabled)
+    client.zonal_stats.raster.batch(POINTS, url=COG, cache=disabled)
+
+    assert route.call_count == 6
+    assert len(client.zonal_stats.cache) == 0
+
+
+@respx.mock
+def test_batches_use_the_client_cache_by_default(client):
+    route = respx.post(RASTER_URL).mock(return_value=ok())
+
+    client.zonal_stats.raster.batch(POINTS, url=COG)
+    client.zonal_stats.raster.batch(POINTS, url=COG)
+
+    assert route.call_count == 3
+    assert len(client.zonal_stats.cache) == 3
+
+
+@respx.mock
+def test_clearing_the_client_cache_sends_the_requests_again(client):
+    route = respx.post(RASTER_URL).mock(return_value=ok())
+
+    client.zonal_stats.raster.batch(POINTS, url=COG)
+    client.zonal_stats.cache.clear()
+    client.zonal_stats.raster.batch(POINTS, url=COG)
+
+    assert route.call_count == 6
+
+
+def test_a_bad_cache_is_rejected_before_any_request(client):
+    with pytest.raises(TypeError, match="cache must be"):
+        client.zonal_stats.raster.batch(POINTS, url=COG, cache="yes")
+
+
+def test_response_cache_drops_the_least_recently_used_entry():
+    cache = ResponseCache(maxsize=2)
+    cache["a"] = 1
+    cache["b"] = 2
+    assert cache["a"] == 1
+    cache["c"] = 3
+
+    assert list(cache) == ["a", "c"]
+    assert cache.get("b") is None
+    assert repr(cache) == "ResponseCache(size=2, maxsize=2)"
+
+
+@pytest.mark.parametrize("maxsize", [0, -1, 1.5, True])
+def test_response_cache_needs_a_positive_integer_size(maxsize):
+    with pytest.raises(ValueError, match="maxsize"):
+        ResponseCache(maxsize=maxsize)
 
 
 # -- errors -----------------------------------------------------------------

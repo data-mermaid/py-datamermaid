@@ -69,7 +69,11 @@ backoff and error mapping are the client's own.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+import hashlib
+import json
+import threading
+from collections import OrderedDict
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from dataclasses import replace
 from enum import Enum
 from functools import cached_property
@@ -98,6 +102,7 @@ __all__ = [
     "BatchItem",
     "RasterStacStats",
     "RasterStats",
+    "ResponseCache",
     "Stat",
     "VectorStacStats",
     "VectorStats",
@@ -263,6 +268,69 @@ def _resolve_labels(aois: Sequence[Any], labels: Iterable[Any] | None) -> list[A
     return resolved
 
 
+class ResponseCache(MutableMapping[str, Any]):
+    """A thread-safe, size-bounded, in-memory cache of zonal stats responses.
+
+    Each [`ZonalStats`][datamermaid.resources.zonal_stats.ZonalStats] resource
+    holds one as ``client.zonal_stats.cache``, and ``batch`` uses it unless told
+    otherwise.  When full, the least recently used entry is dropped.
+    """
+
+    def __init__(self, maxsize: int = 10_000) -> None:
+        if isinstance(maxsize, bool) or not isinstance(maxsize, int) or maxsize < 1:
+            raise ValueError("maxsize must be a positive integer")
+        self.maxsize = maxsize
+        self._data: OrderedDict[str, Any] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(size={len(self)}, maxsize={self.maxsize})"
+
+    def __getitem__(self, key: str) -> Any:
+        with self._lock:
+            value = self._data[key]
+            self._data.move_to_end(key)
+            return value
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._data[key] = value
+            self._data.move_to_end(key)
+            while len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+
+    def __delitem__(self, key: str) -> None:
+        with self._lock:
+            del self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        with self._lock:
+            return iter(list(self._data))
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+
+def _resolve_cache(
+    cache: MutableMapping[str, Any] | bool | None, default: MutableMapping[str, Any]
+) -> MutableMapping[str, Any] | None:
+    """``True`` is the resource's own cache; ``False`` or ``None`` turns caching off."""
+    if cache is True:
+        return default
+    if cache is False or cache is None:
+        return None
+    if not isinstance(cache, MutableMapping):
+        raise TypeError(
+            f"cache must be True, False, None or a mutable mapping, got {type(cache).__name__}"
+        )
+    return cache
+
+
 def _check_url(url: Any) -> str:
     if not isinstance(url, str) or not url.strip():
         raise ValueError("url must be a non-empty string")
@@ -303,6 +371,7 @@ class BaseZonalStats:
         names: list[str] | None,
         radius: float | None,
         options: dict[str, Any],
+        cache: MutableMapping[str, Any] | None = None,
     ) -> Callable[[ZonalTask], ZonalStatsResult]:
         """Bind a resolved source to its request target and prepared body template."""
         template = {key: value for key, value in options.items() if value is not None}
@@ -313,23 +382,45 @@ class BaseZonalStats:
 
         def compute(task: ZonalTask) -> ZonalStatsResult:
             body = {**template, "aoi": to_aoi(task.aoi, radius=radius)}
-            result = post(body, label=task.label)
+            result = post(body, label=task.label, cache=cache)
             return replace(result, stac=source.stac) if source.stac is not None else result
 
         return compute
 
-    def _post(self, body: dict[str, Any], *, label: Any) -> ZonalStatsResult:
-        # The service is public and lives on another host, so `public=True`
-        # sends it neither the client's auth nor its extra headers.
-        data = self._client.request_json("POST", self.url, json=body, public=True)
+    def _cache_key(self, body: dict[str, Any]) -> str:
+        """Hash the route and the full request body; equal bodies give equal answers."""
+        canonical = json.dumps(
+            {"endpoint": self.url, "body": body}, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def _post(
+        self,
+        body: dict[str, Any],
+        *,
+        label: Any,
+        cache: MutableMapping[str, Any] | None = None,
+    ) -> ZonalStatsResult:
+        key = self._cache_key(body) if cache is not None else ""
+        data = cache.get(key) if cache is not None else None
+        if data is None:
+            # The service is public and lives on another host, so `public=True`
+            # sends it neither the client's auth nor its extra headers.
+            data = self._client.request_json("POST", self.url, json=body, public=True)
         try:
-            return ZonalStatsResult.from_api(data, aoi=body["aoi"], source=body["url"], label=label)
+            result = ZonalStatsResult.from_api(
+                data, aoi=body["aoi"], source=body["url"], label=label
+            )
         except TypeError as exc:
             # An empty body or the wrong JSON shape is as unusable as a
             # non-JSON body, which `request_json` already reports this way.
             raise MermaidConnectionError(
                 f"POST {self.url} returned a body that is not a zonal stats response: {exc}"
             ) from exc
+        # Only a usable response is stored, so failures are retried next time.
+        if cache is not None:
+            cache[key] = data
+        return result
 
     def _request(
         self,
@@ -389,6 +480,7 @@ class BaseZonalStats:
         labels: Iterable[Any] | None,
         stats: Iterable[Stat | str] | None,
         radius: float | None,
+        cache: MutableMapping[str, Any] | None = None,
         **options: Any,
     ) -> ZonalJob:
         """Validate options and bind every source before constructing the job."""
@@ -400,7 +492,7 @@ class BaseZonalStats:
         resolved_sources = resolve_sources(url, sources, search, options.get("asset"))
         # Identity keys preserve distinct items even when their asset URLs match.
         requests = {
-            id(source): self._bind_source(source, names, radius, options)
+            id(source): self._bind_source(source, names, radius, options, cache)
             for source in resolved_sources
         }
 
@@ -416,6 +508,7 @@ class BaseZonalStats:
         labels: Iterable[Any] | None,
         max_workers: int,
         errors: Literal["raise", "return"],
+        cache: MutableMapping[str, Any] | bool | None = True,
         url: str | None = None,
         sources: Iterable[SourceInput] | None = None,
         search: StacSearchLike | None = None,
@@ -435,6 +528,7 @@ class BaseZonalStats:
         """
 
         _validate_execution(max_workers, errors)
+        store = _resolve_cache(cache, self._resource.cache)
         job = self._prepare(
             aois,
             url=url,
@@ -443,6 +537,7 @@ class BaseZonalStats:
             labels=labels,
             stats=stats,
             radius=radius,
+            cache=store,
             **options,
         )
         return job.run(max_workers=max_workers, errors=errors, stream=stream)
@@ -494,6 +589,7 @@ class BaseZonalStats:
         stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -511,6 +607,7 @@ class BaseZonalStats:
         stream: Literal[True],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -528,6 +625,7 @@ class BaseZonalStats:
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -545,6 +643,7 @@ class BaseZonalStats:
         stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -562,6 +661,7 @@ class BaseZonalStats:
         stream: Literal[True],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -579,6 +679,7 @@ class BaseZonalStats:
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -598,6 +699,7 @@ class BaseZonalStats:
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -627,6 +729,18 @@ class BaseZonalStats:
                 [`Site`][datamermaid.models.Site] is labelled by its ``id``, a
                 ``Feature`` by its ``id``, and anything else by its position.
             max_workers: Most requests in flight at once.
+            cache: Where successful responses are kept, keyed by a hash of the
+                route and the request body.  A request already in the cache is
+                answered without calling the service, so a rerun only sends the
+                requests that failed or are new.  ``True`` (the default) uses
+                ``client.zonal_stats.cache``, an in-memory
+                [`ResponseCache`][datamermaid.resources.zonal_stats.ResponseCache]
+                shared by every batch on the client.  ``False`` or ``None`` sends
+                every request and stores nothing.  Any other mutable mapping,
+                such as a ``dict`` or a ``diskcache.Cache``, is used in its place.
+                Failures are never stored.  The key does not cover the source's
+                contents, so clear the cache if the data at a URL changes.  Two
+                workers asking for the same uncached body at once both send it.
             errors: ``"raise"`` raises the first error in input order after all
                 requests finish; ``"return"`` retains BatchFailure objects with the
                 input task and original exception.
@@ -637,13 +751,15 @@ class BaseZonalStats:
         Raises:
             ValueError: If ``url`` is empty, ``labels`` has the wrong length, or
                 ``max_workers`` is below ``1``.
-            TypeError: If ``aois`` is not iterable, or is a single geometry.
+            TypeError: If ``aois`` is not iterable, or is a single geometry, or
+                ``cache`` is not a bool, ``None`` or a mutable mapping.
         """
 
         return self._batch(
             aois,
             labels=labels,
             max_workers=max_workers,
+            cache=cache,
             errors=errors,
             url=url,
             sources=sources,
@@ -755,6 +871,7 @@ class RasterStats(BaseZonalStats):
         stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -773,6 +890,7 @@ class RasterStats(BaseZonalStats):
         stream: Literal[True],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -791,6 +909,7 @@ class RasterStats(BaseZonalStats):
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -809,6 +928,7 @@ class RasterStats(BaseZonalStats):
         stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -827,6 +947,7 @@ class RasterStats(BaseZonalStats):
         stream: Literal[True],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -845,6 +966,7 @@ class RasterStats(BaseZonalStats):
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -865,6 +987,7 @@ class RasterStats(BaseZonalStats):
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -895,6 +1018,7 @@ class RasterStats(BaseZonalStats):
             aois,
             labels=labels,
             max_workers=max_workers,
+            cache=cache,
             errors=errors,
             url=url,
             sources=sources,
@@ -921,11 +1045,12 @@ class RasterStacStats(RasterStats):
         names: list[str] | None,
         radius: float | None,
         options: dict[str, Any],
+        cache: MutableMapping[str, Any] | None = None,
     ) -> Callable[[ZonalTask], ZonalStatsResult]:
         if source.stac is not None:
             options = {key: value for key, value in options.items() if key != "asset"}
-            return self._resource.raster._bind_source(source, names, radius, options)
-        return super()._bind_source(source, names, radius, options)
+            return self._resource.raster._bind_source(source, names, radius, options, cache)
+        return super()._bind_source(source, names, radius, options, cache)
 
     def prepare(  # type: ignore[override]
         self,
@@ -1008,6 +1133,7 @@ class RasterStacStats(RasterStats):
         stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1027,6 +1153,7 @@ class RasterStacStats(RasterStats):
         stream: Literal[True],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1046,6 +1173,7 @@ class RasterStacStats(RasterStats):
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1065,6 +1193,7 @@ class RasterStacStats(RasterStats):
         stream: Literal[False] = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1084,6 +1213,7 @@ class RasterStacStats(RasterStats):
         stream: Literal[True],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1103,6 +1233,7 @@ class RasterStacStats(RasterStats):
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1124,6 +1255,7 @@ class RasterStacStats(RasterStats):
         stream: bool = False,
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1146,6 +1278,7 @@ class RasterStacStats(RasterStats):
             aois,
             labels=labels,
             max_workers=max_workers,
+            cache=cache,
             errors=errors,
             url=url,
             sources=sources,
@@ -1276,6 +1409,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1296,6 +1430,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1316,6 +1451,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1336,6 +1472,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1356,6 +1493,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1376,6 +1514,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1398,6 +1537,7 @@ class VectorStats(BaseZonalStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1420,6 +1560,7 @@ class VectorStats(BaseZonalStats):
             aois,
             labels=labels,
             max_workers=max_workers,
+            cache=cache,
             errors=errors,
             url=url,
             sources=sources,
@@ -1452,13 +1593,14 @@ class VectorStacStats(VectorStats):
         names: list[str] | None,
         radius: float | None,
         options: dict[str, Any],
+        cache: MutableMapping[str, Any] | None = None,
     ) -> Callable[[ZonalTask], ZonalStatsResult]:
         if source.stac is not None:
             options = {key: value for key, value in options.items() if key != "asset"}
             if options.get("geometry_column") is None:
                 options["geometry_column"] = "geometry"
-            return self._resource.vector._bind_source(source, names, radius, options)
-        return super()._bind_source(source, names, radius, options)
+            return self._resource.vector._bind_source(source, names, radius, options, cache)
+        return super()._bind_source(source, names, radius, options, cache)
 
     def prepare(  # type: ignore[override]
         self,
@@ -1554,6 +1696,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1575,6 +1718,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1596,6 +1740,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1617,6 +1762,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1638,6 +1784,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1659,6 +1806,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1682,6 +1830,7 @@ class VectorStacStats(VectorStats):
         columns: Sequence[str],
         labels: Iterable[Any] | None = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
@@ -1705,6 +1854,7 @@ class VectorStacStats(VectorStats):
             aois,
             labels=labels,
             max_workers=max_workers,
+            cache=cache,
             errors=errors,
             url=url,
             sources=sources,
@@ -1740,6 +1890,9 @@ class ZonalStats(BaseResource):
     def __init__(self, client: MermaidClient) -> None:
         super().__init__(client)
         self.path = client.zonal_stats_url
+        #: Responses kept for ``batch`` calls that leave ``cache`` at its default.
+        #: Call ``client.zonal_stats.cache.clear()`` if a source changes.
+        self.cache: MutableMapping[str, Any] = ResponseCache()
 
     @cached_property
     def raster(self) -> RasterStats:

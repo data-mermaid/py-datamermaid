@@ -209,10 +209,12 @@ def test_all_execution_modes_preserve_requests_values_and_provenance(client, nam
     options.update(url="https://data.test/source", stats=["mean"], radius=500)
     aois = [(1, 2), (3, 4)]
     labels = ["reef-a", "reef-b"]
-    eager = endpoint.batch(aois, labels=labels, max_workers=1, **options)
+    eager = endpoint.batch(aois, labels=labels, max_workers=1, cache=False, **options)
     job = endpoint.prepare(aois, labels=labels, **options)
     prepared = job.run(max_workers=1)
-    with endpoint.batch(aois, labels=labels, max_workers=1, stream=True, **options) as stream:
+    with endpoint.batch(
+        aois, labels=labels, max_workers=1, stream=True, cache=False, **options
+    ) as stream:
         streamed = list(stream)
     with job.run(stream=True, max_workers=1) as stream:
         prepared_streamed = list(stream)
