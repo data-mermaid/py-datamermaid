@@ -942,9 +942,11 @@ class RasterStats(BaseZonalStats):
 
         Args:
             aois: The areas of interest, as for ``BaseZonalStats.batch``.
-            bands: 1-based band indices to read.  Omitted, the service reads
-                band 1.
-            approx_stats: Read overviews for faster, approximate values.
+
+        Keyword Args:
+            bands (Sequence[int] | None): 1-based band indices to read.
+                Omitted, the service reads band 1.
+            approx_stats (bool): Read overviews for faster, approximate values.
         """
         result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
         return result
@@ -1118,10 +1120,12 @@ class RasterStacStats(RasterStats):
 
         Args:
             aois: The areas of interest, as for ``BaseZonalStats.batch``.
-            bands: 1-based band indices to read.  Omitted, the service reads
-                band 1.
-            approx_stats: Read overviews for faster, approximate values.
-            asset: Key of the raster asset to read.
+
+        Keyword Args:
+            bands (Sequence[int] | None): 1-based band indices to read.
+                Omitted, the service reads band 1.
+            approx_stats (bool): Read overviews for faster, approximate values.
+            asset (str | None): Key of the raster asset to read.
         """
         result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
         return result
@@ -1300,13 +1304,16 @@ class VectorStats(BaseZonalStats):
 
         Args:
             aois: The areas of interest, as for ``BaseZonalStats.batch``.
-            columns: Numeric columns to summarise.  Required and non-empty.
-            geometry_column: Name of the geometry column.  Omitted, the service
-                uses ``geometry``.
-            weighting_method: How intersecting features are weighted, a
-                ``WeightingMethod`` or its name.  Omitted, the service weights
-                by ``area``.
-            approx_stats: Reserved by the service for a future optimisation.
+
+        Keyword Args:
+            columns (Sequence[str]): Numeric columns to summarise.  Required
+                and non-empty.
+            geometry_column (str | None): Name of the geometry column.
+                Omitted, the service uses ``geometry``.
+            weighting_method (WeightingMethod | str | None): How
+                intersecting features are weighted, a ``WeightingMethod`` or
+                its name.  Omitted, the service weights by ``area``.
+            approx_stats (bool): Reserved by the service for a future optimisation.
         """
         result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
         return result
@@ -1499,14 +1506,17 @@ class VectorStacStats(VectorStats):
 
         Args:
             aois: The areas of interest, as for ``BaseZonalStats.batch``.
-            columns: Numeric columns to summarise.  Required and non-empty.
-            asset: Key of the GeoParquet asset to read.
-            geometry_column: Name of the geometry column.  Omitted, the service
-                uses ``geometry``.
-            weighting_method: How intersecting features are weighted, a
-                ``WeightingMethod`` or its name.  Omitted, the service weights
-                by ``area``.
-            approx_stats: Reserved by the service for a future optimisation.
+
+        Keyword Args:
+            columns (Sequence[str]): Numeric columns to summarise.  Required
+                and non-empty.
+            asset (str | None): Key of the GeoParquet asset to read.
+            geometry_column (str | None): Name of the geometry column.
+                Omitted, the service uses ``geometry``.
+            weighting_method (WeightingMethod | str | None): How
+                intersecting features are weighted, a ``WeightingMethod`` or
+                its name.  Omitted, the service weights by ``area``.
+            approx_stats (bool): Reserved by the service for a future optimisation.
         """
         result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
         return result
