@@ -3,6 +3,7 @@
 import json
 import threading
 
+import httpx
 import pytest
 import respx
 
@@ -211,7 +212,7 @@ def test_all_execution_modes_preserve_requests_values_and_provenance(client, nam
     aois = [(1, 2), (3, 4)]
     labels = ["reef-a", "reef-b"]
     eager = endpoint.batch(aois, labels=labels, max_workers=1, cache=False, **options)
-    job = endpoint.prepare(aois, labels=labels, **options)
+    job = endpoint.prepare(aois, labels=labels, cache=False, **options)
     prepared = job.run(max_workers=1)
     with endpoint.batch(
         aois, labels=labels, max_workers=1, stream=True, cache=False, **options
@@ -223,6 +224,25 @@ def test_all_execution_modes_preserve_requests_values_and_provenance(client, nam
     bodies = [json.loads(call.request.content) for call in route.calls]
     assert len(bodies) == 8
     assert bodies[:2] == bodies[2:4] == bodies[4:6] == bodies[6:8]
+
+
+@respx.mock
+def test_a_prepared_job_reruns_from_the_cache(client):
+    route = respx.post(f"{ZONAL_STATS_URL}raster").mock(
+        side_effect=[
+            httpx.Response(200, json={"band_1": {"mean": 28}}),
+            httpx.Response(400, json={"detail": "unreadable"}),
+            httpx.Response(200, json={"band_1": {"mean": 29}}),
+        ]
+    )
+    job = client.zonal_stats.raster.prepare([(1, 2), (3, 4)], url="https://data.test/source")
+
+    first = job.run(max_workers=1, errors="return")
+    assert isinstance(first[1], BatchFailure)
+    second = job.run(max_workers=1)
+
+    assert [result["band_1"]["mean"] for result in second] == [28, 29]
+    assert route.call_count == 3  # the rerun only sent the request that failed
 
 
 @respx.mock
@@ -281,7 +301,12 @@ def test_prepared_options_are_a_snapshot_and_search_is_consumed_once(client):
     stats = ["mean"]
     search = Search(1)
     job = client.zonal_stats.raster_stac.prepare(
-        [(1, 2), (3, 4)], search=search, asset="data", bands=bands, stats=iter(stats)
+        [(1, 2), (3, 4)],
+        search=search,
+        asset="data",
+        bands=bands,
+        stats=iter(stats),
+        cache=False,
     )
     bands.clear()
     stats.clear()

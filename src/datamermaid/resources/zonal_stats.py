@@ -268,15 +268,23 @@ def _resolve_labels(aois: Sequence[Any], labels: Iterable[Any] | None) -> list[A
     return resolved
 
 
+#: Responses ``client.zonal_stats.cache`` keeps.  A response is a few hundred
+#: bytes, so a full cache is tens of megabytes.
+DEFAULT_CACHE_SIZE = 100_000
+
+
 class ResponseCache(MutableMapping[str, Any]):
     """A thread-safe, size-bounded, in-memory cache of zonal stats responses.
 
     Each [`ZonalStats`][datamermaid.resources.zonal_stats.ZonalStats] resource
-    holds one as ``client.zonal_stats.cache``, and ``batch`` uses it unless told
-    otherwise.  When full, the least recently used entry is dropped.
+    holds one as ``client.zonal_stats.cache``, and ``batch`` and ``prepare``
+    use it unless told otherwise.  When full, the least recently used entry is
+    dropped, so a rerun of a job larger than ``maxsize`` sends some requests
+    again.  For those, or to keep responses between sessions, pass a
+    persistent mapping such as a ``diskcache.Cache`` as ``cache=``.
     """
 
-    def __init__(self, maxsize: int = 10_000) -> None:
+    def __init__(self, maxsize: int = DEFAULT_CACHE_SIZE) -> None:
         if isinstance(maxsize, bool) or not isinstance(maxsize, int) or maxsize < 1:
             raise ValueError("maxsize must be a positive integer")
         self.maxsize = maxsize
@@ -450,6 +458,7 @@ class BaseZonalStats:
         labels: Iterable[Any] | None = None,
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
+        cache: MutableMapping[str, Any] | bool | None = True,
         **options: Any,
     ) -> ZonalJob:
         """Resolve sources and count pairs without submitting statistics requests.
@@ -458,6 +467,9 @@ class BaseZonalStats:
         pystac-client ItemSearch via search. Item assets resolve to data URLs;
         string URLs retain this endpoint's usual meaning. AOIs and sources are
         retained, but their Cartesian product is generated lazily at execution.
+
+        ``cache`` works as for [`batch`][..batch], so running the job again
+        after a failure only sends the requests that did not succeed.
         """
         return self._prepare(
             aois,
@@ -467,6 +479,7 @@ class BaseZonalStats:
             labels=labels,
             stats=stats,
             radius=radius,
+            cache=cache,
             **options,
         )
 
@@ -480,10 +493,11 @@ class BaseZonalStats:
         labels: Iterable[Any] | None,
         stats: Iterable[Stat | str] | None,
         radius: float | None,
-        cache: MutableMapping[str, Any] | None = None,
+        cache: MutableMapping[str, Any] | bool | None = True,
         **options: Any,
     ) -> ZonalJob:
         """Validate options and bind every source before constructing the job."""
+        store = _resolve_cache(cache, self._resource.cache)
         radius = _validate_radius(radius)
         options = self._options(**options)
         names = _stats(stats)
@@ -492,7 +506,7 @@ class BaseZonalStats:
         resolved_sources = resolve_sources(url, sources, search, options.get("asset"))
         # Identity keys preserve distinct items even when their asset URLs match.
         requests = {
-            id(source): self._bind_source(source, names, radius, options, cache)
+            id(source): self._bind_source(source, names, radius, options, store)
             for source in resolved_sources
         }
 
@@ -500,47 +514,6 @@ class BaseZonalStats:
             return requests[id(task.source)](task)
 
         return ZonalJob(expanded, resolved_labels, resolved_sources, compute)
-
-    def _batch(
-        self,
-        aois: Any,
-        *,
-        labels: Iterable[Any] | None,
-        max_workers: int,
-        errors: Literal["raise", "return"],
-        cache: MutableMapping[str, Any] | bool | None = True,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        stats: Iterable[Stat | str] | None,
-        radius: float | None,
-        **options: Any,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ):
-        """Expand the AOIs, assign labels, and execute all requests.
-
-        The URL, the statistic names and the labels are checked here, before
-        anything runs; each AOI is validated when its own request is composed,
-        so a bad one fails at its position without spoiling the others.
-        """
-
-        _validate_execution(max_workers, errors)
-        store = _resolve_cache(cache, self._resource.cache)
-        job = self._prepare(
-            aois,
-            url=url,
-            sources=sources,
-            search=search,
-            labels=labels,
-            stats=stats,
-            radius=radius,
-            cache=store,
-            **options,
-        )
-        return job.run(max_workers=max_workers, errors=errors, stream=stream)
 
     def stats(
         self,
@@ -746,7 +719,10 @@ class BaseZonalStats:
                 input task and original exception.
             stats: Statistic names, as for [`stats`][..stats].
             radius: Buffer around a ``Point``, in metres.
-            **options: Route-specific body fields; a ``None`` value is left out.
+            **options: The route's own options, the same as its ``stats`` and
+                ``prepare`` take: ``bands`` and ``approx_stats`` for rasters,
+                ``columns``, ``geometry_column`` and ``weighting_method`` for
+                vectors, ``asset`` for the STAC routes.
 
         Raises:
             ValueError: If ``url`` is empty, ``labels`` has the wrong length, or
@@ -755,20 +731,19 @@ class BaseZonalStats:
                 ``cache`` is not a bool, ``None`` or a mutable mapping.
         """
 
-        return self._batch(
+        _validate_execution(max_workers, errors)
+        job = self.prepare(
             aois,
-            labels=labels,
-            max_workers=max_workers,
-            cache=cache,
-            errors=errors,
             url=url,
             sources=sources,
             search=search,
-            stream=stream,
+            labels=labels,
             stats=stats,
             radius=radius,
+            cache=cache,
             **options,
         )
+        return job.run(max_workers=max_workers, errors=errors, stream=stream)
 
     def __call__(self, aoi: GeometryLike, *, url: str, **kwargs: Any) -> ZonalStatsResult:
         """Same as [`stats`][..stats], so ``client.zonal_stats.raster(aoi, url=...)`` works."""
@@ -804,8 +779,14 @@ class RasterStats(BaseZonalStats):
         radius: float | None = None,
         bands: Sequence[int] | None = None,
         approx_stats: bool = False,
+        cache: MutableMapping[str, Any] | bool | None = True,
     ) -> ZonalJob:
-        """Prepare source calculations using the same options as stats() and batch()."""
+        """Resolve sources for [`batch`][..batch] without sending statistics requests.
+
+        Takes the options of [`stats`][..stats], plus ``url``, ``sources``,
+        ``search``, ``labels`` and ``cache`` as for
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch].
+        """
         return self._prepare(
             aois,
             labels=labels,
@@ -816,6 +797,7 @@ class RasterStats(BaseZonalStats):
             radius=radius,
             bands=bands,
             approx_stats=approx_stats,
+            cache=cache,
         )
 
     def stats(  # type: ignore[override]
@@ -860,176 +842,6 @@ class RasterStats(BaseZonalStats):
             approx_stats=approx_stats,
         )
 
-    @overload  # type: ignore[override]
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ): ...
-
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ):
-        """One raster statistics request per area of interest, run in parallel.
-
-        Takes the same options as [`stats`][..stats]; see
-        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
-        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
-        options are validated before any request is made.
-
-        Example:
-            ```python
-            sites = client.projects(project_id).sites.list()
-            batch = client.zonal_stats.raster.batch(
-                sites, url="https://example.test/depth.tif", stats=["mean"], radius=500
-            )
-            frame = batch.to_df()  # columns: label (the site id), source, band_1_mean
-            ```
-        """
-
-        return self._batch(
-            aois,
-            labels=labels,
-            max_workers=max_workers,
-            cache=cache,
-            errors=errors,
-            url=url,
-            sources=sources,
-            search=search,
-            stream=stream,
-            stats=stats,
-            radius=radius,
-            bands=bands,
-            approx_stats=approx_stats,
-        )
-
 
 class RasterStacStats(RasterStats):
     """``POST .../zonal-stats/raster/stac``: statistics from a raster asset of a STAC Item."""
@@ -1065,8 +877,14 @@ class RasterStacStats(RasterStats):
         asset: str | None = None,
         bands: Sequence[int] | None = None,
         approx_stats: bool = False,
+        cache: MutableMapping[str, Any] | bool | None = True,
     ) -> ZonalJob:
-        """Prepare source calculations using the same options as stats() and batch()."""
+        """Resolve sources for [`batch`][..batch] without sending statistics requests.
+
+        Takes the options of [`stats`][..stats], plus ``url``, ``sources``,
+        ``search``, ``labels`` and ``cache`` as for
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch].
+        """
         return self._prepare(
             aois,
             labels=labels,
@@ -1078,6 +896,7 @@ class RasterStacStats(RasterStats):
             asset=asset,
             bands=bands,
             approx_stats=approx_stats,
+            cache=cache,
         )
 
     def stats(  # type: ignore[override]
@@ -1115,175 +934,6 @@ class RasterStacStats(RasterStats):
             aoi,
             label=label,
             url=url,
-            stats=stats,
-            radius=radius,
-            asset=asset,
-            bands=bands,
-            approx_stats=approx_stats,
-        )
-
-    @overload  # type: ignore[override]
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ): ...
-
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        bands: Sequence[int] | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ):
-        """One STAC raster statistics request per area of interest, run in parallel.
-
-        Takes the same options as [`stats`][..stats]; see
-        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
-        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
-        options are validated before any request is made.
-        """
-
-        return self._batch(
-            aois,
-            labels=labels,
-            max_workers=max_workers,
-            cache=cache,
-            errors=errors,
-            url=url,
-            sources=sources,
-            search=search,
-            stream=stream,
             stats=stats,
             radius=radius,
             asset=asset,
@@ -1330,8 +980,14 @@ class VectorStats(BaseZonalStats):
         geometry_column: str | None = None,
         weighting_method: WeightingMethod | str | None = None,
         approx_stats: bool = False,
+        cache: MutableMapping[str, Any] | bool | None = True,
     ) -> ZonalJob:
-        """Prepare source calculations using the same options as stats() and batch()."""
+        """Resolve sources for [`batch`][..batch] without sending statistics requests.
+
+        Takes the options of [`stats`][..stats], plus ``url``, ``sources``,
+        ``search``, ``labels`` and ``cache`` as for
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch].
+        """
         return self._prepare(
             aois,
             labels=labels,
@@ -1344,6 +1000,7 @@ class VectorStats(BaseZonalStats):
             geometry_column=geometry_column,
             weighting_method=weighting_method,
             approx_stats=approx_stats,
+            cache=cache,
         )
 
     def stats(  # type: ignore[override]
@@ -1397,183 +1054,6 @@ class VectorStats(BaseZonalStats):
             approx_stats=approx_stats,
         )
 
-    @overload  # type: ignore[override]
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ): ...
-
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ):
-        """One vector statistics request per area of interest, run in parallel.
-
-        Takes the same options as [`stats`][..stats]; see
-        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
-        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
-        options are validated before any request is made.
-        """
-
-        return self._batch(
-            aois,
-            labels=labels,
-            max_workers=max_workers,
-            cache=cache,
-            errors=errors,
-            url=url,
-            sources=sources,
-            search=search,
-            stream=stream,
-            stats=stats,
-            radius=radius,
-            columns=columns,
-            geometry_column=geometry_column,
-            weighting_method=weighting_method,
-            approx_stats=approx_stats,
-        )
-
 
 class VectorStacStats(VectorStats):
     """``POST .../zonal-stats/vector/stac``: statistics from a GeoParquet asset of a STAC Item.
@@ -1617,8 +1097,14 @@ class VectorStacStats(VectorStats):
         geometry_column: str | None = None,
         weighting_method: WeightingMethod | str | None = None,
         approx_stats: bool = False,
+        cache: MutableMapping[str, Any] | bool | None = True,
     ) -> ZonalJob:
-        """Prepare source calculations using the same options as stats() and batch()."""
+        """Resolve sources for [`batch`][..batch] without sending statistics requests.
+
+        Takes the options of [`stats`][..stats], plus ``url``, ``sources``,
+        ``search``, ``labels`` and ``cache`` as for
+        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch].
+        """
         return self._prepare(
             aois,
             labels=labels,
@@ -1632,6 +1118,7 @@ class VectorStacStats(VectorStats):
             geometry_column=geometry_column,
             weighting_method=weighting_method,
             approx_stats=approx_stats,
+            cache=cache,
         )
 
     def stats(  # type: ignore[override]
@@ -1684,191 +1171,6 @@ class VectorStacStats(VectorStats):
             approx_stats=approx_stats,
         )
 
-    @overload  # type: ignore[override]
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult] | BatchStream[ZonalTask, ZonalStatsResult]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[False] = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: Literal[True],
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
-
-    @overload
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ): ...
-
-    def batch(
-        self,
-        aois: Any,
-        *,
-        url: str | None = None,
-        sources: Iterable[SourceInput] | None = None,
-        search: StacSearchLike | None = None,
-        stream: bool = False,
-        columns: Sequence[str],
-        labels: Iterable[Any] | None = None,
-        max_workers: int = DEFAULT_MAX_WORKERS,
-        cache: MutableMapping[str, Any] | bool | None = True,
-        errors: Literal["raise", "return"] = "raise",
-        stats: Iterable[Stat | str] | None = None,
-        radius: float | None = None,
-        asset: str | None = None,
-        geometry_column: str | None = None,
-        weighting_method: WeightingMethod | str | None = None,
-        approx_stats: bool = False,
-    ) -> (
-        Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-        | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
-    ):
-        """One STAC vector statistics request per area of interest, run in parallel.
-
-        Takes the same options as [`stats`][..stats]; see
-        [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]
-        for how ``aois``, ``labels``, ``max_workers`` and ``errors`` behave.  The
-        options are validated before any request is made.
-        """
-
-        return self._batch(
-            aois,
-            labels=labels,
-            max_workers=max_workers,
-            cache=cache,
-            errors=errors,
-            url=url,
-            sources=sources,
-            search=search,
-            stream=stream,
-            stats=stats,
-            radius=radius,
-            asset=asset,
-            columns=columns,
-            geometry_column=geometry_column,
-            weighting_method=weighting_method,
-            approx_stats=approx_stats,
-        )
-
 
 #: Every route of the service, as ``(property name, endpoint class)``, in the
 #: order they appear on [`ZonalStats`][.ZonalStats].
@@ -1890,7 +1192,8 @@ class ZonalStats(BaseResource):
     def __init__(self, client: MermaidClient) -> None:
         super().__init__(client)
         self.path = client.zonal_stats_url
-        #: Responses kept for ``batch`` calls that leave ``cache`` at its default.
+        #: Responses kept for ``batch`` and ``prepare`` calls that leave ``cache``
+        #: at its default.
         #: Call ``client.zonal_stats.cache.clear()`` if a source changes.
         self.cache: MutableMapping[str, Any] = ResponseCache()
 

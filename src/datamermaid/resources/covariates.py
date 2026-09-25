@@ -393,6 +393,7 @@ class CovariateCollection:
         labels: Iterable[Any] | None = None,
         stats: Iterable[Stat | str] | None = None,
         radius: float | None = None,
+        cache: MutableMapping[str, Any] | bool | None = True,
         **options: Any,
     ) -> ZonalJob:
         """Resolve the matching items and return a [`ZonalJob`][datamermaid.ZonalJob] to run.
@@ -411,7 +412,13 @@ class CovariateCollection:
             options=options,
         )
         job: ZonalJob = endpoint.prepare(
-            aois, sources=sources, labels=labels, stats=stats, radius=radius, **options
+            aois,
+            sources=sources,
+            labels=labels,
+            stats=stats,
+            radius=radius,
+            cache=cache,
+            **options,
         )
         return job
 

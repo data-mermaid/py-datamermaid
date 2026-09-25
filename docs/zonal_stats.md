@@ -294,8 +294,9 @@ with client.zonal_stats.raster_stac.batch(
 (which still require `columns=`). Existing `batch(..., url=...)` calls remain
 eager by default. Streaming does not reduce the number of requests, provide a
 persistent checkpoint, or automatically resume an interrupted job. Running a
-prepared job again repeats the calculations; saved JSONL rows can be used by
-applications to track completed pairs. Signed asset URLs must remain valid for
+prepared job again reads the requests that succeeded from the response cache
+(see [Caching results between batches](#caching-results-between-batches)) and sends only the rest. Saved JSONL rows
+can be used by applications to track completed pairs. Signed asset URLs must remain valid for
 the duration of execution.
 
 ## Many areas at once
@@ -417,16 +418,17 @@ The `cache=` argument controls this:
 | `False` or `None`      | Send every request and store nothing.                      |
 | A mutable mapping      | Use that mapping, for example a `dict` or `diskcache.Cache`. |
 
-The default cache holds 10,000 responses and drops the least recently used one
-when it is full. It lasts as long as the client. To keep results across
-sessions, pass a mapping that stores to disk, such as
-`diskcache.Cache("zonal-cache")`.
+The default cache holds 100,000 responses and drops the least recently used one
+when it is full. A response is a few hundred bytes, so a full cache uses tens of
+megabytes. It lasts as long as the client. For a job of more than 100,000
+requests, or to keep results across sessions, pass a mapping that stores to
+disk, such as `diskcache.Cache("zonal-cache")`.
 
 The key covers the source URL, not the data at that URL. If a file or STAC
 Item is replaced at the same URL, call `client.zonal_stats.cache.clear()` or
 pass `cache=False`. Two workers that request the same uncached body at the same
-time both send it. Only `batch` uses the cache: `stats` and `prepare().run()`
-always send their requests.
+time both send it. `batch` and `prepare` use the cache, and so does every run of
+a prepared job. `stats` always sends its request.
 
 ### Uniform batch failures and inputs
 
