@@ -1,9 +1,8 @@
 """Auth0 tenant configuration for the OAuth flows.
 
-The defaults point at MERMAID's production Auth0 tenant and are the same
-values the R client (`mermaidr`) uses.  Every one of them can be overridden
-per call or through the environment, so the SDK can also be pointed at the
-development tenant.
+The defaults point at MERMAID's production Auth0 tenant.  Every one of them
+can be overridden per call or through the environment, so the SDK can also be
+pointed at the development tenant.
 """
 
 from __future__ import annotations

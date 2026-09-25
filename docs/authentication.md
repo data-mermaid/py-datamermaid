@@ -178,7 +178,7 @@ the redirect to what the application allows:
 ```python
 import datamermaid
 
-# `mermaidr`, the R client, registers port 1410.
+# The production application registers port 1410.
 datamermaid.login(flow="pkce", redirect_port=1410)
 ```
 
@@ -246,8 +246,7 @@ except AuthFlowError as exc:
 
 ## Auth0 configuration
 
-The defaults point at MERMAID's production tenant and match what the R client,
-[`mermaidr`](https://github.com/data-mermaid/mermaidr), uses.
+The defaults point at MERMAID's production tenant.
 
 | Argument | Environment variable | Default |
 | --- | --- | --- |

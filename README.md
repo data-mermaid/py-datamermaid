@@ -523,7 +523,7 @@ Keyword arguments win over the environment, which wins over the defaults.
 The `pkce` and `implicit` flows redirect to `http://localhost:<ephemeral
 port>/`. Auth0 matches Allowed Callback URLs literally, so a tenant that has
 not registered port-agnostic loopback URLs will answer with "Callback URL
-mismatch"; pin the redirect with `redirect_port=` (the R client, `mermaidr`,
+mismatch"; pin the redirect with `redirect_port=` (the production application
 registers `1410`) and `redirect_host=` to match what the application allows.
 The socket itself always listens on `127.0.0.1` only. Use
 `redirect_host="127.0.0.1"` if the registered URL uses the literal address
