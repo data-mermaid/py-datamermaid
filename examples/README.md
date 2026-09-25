@@ -40,6 +40,7 @@ set them instead of raising.
 | [`reference_data.py`](reference_data.py) | Public fish and benthic taxonomies as DataFrames, joined to the `/choices/` vocabularies | `uv run examples/reference_data.py` |
 | [`project_data.py`](project_data.py) | One project's sites, sample events and fish belt observations as DataFrames | `uv run examples/project_data.py --project-id <uuid>` |
 | [`zonal_stats.py`](zonal_stats.py) | Raster statistics around every site of one project, batched in parallel | `uv run examples/zonal_stats.py --url <cog-url>` |
+| [`covariates.py`](covariates.py) | List the covariate datasets, describe CoralTemp, and summarise it at two points; needs no credentials | `uv run examples/covariates.py` |
 | [`zonal_stats_sst.py`](zonal_stats_sst.py) | Daily CoralTemp means around project sites, streamed to JSONL | `uv run examples/zonal_stats_sst.py --project-id <uuid>` |
 
 `project_data.py` takes `--project-id` (defaulting to `$MERMAID_PROJECT_ID`, and
