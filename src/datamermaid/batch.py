@@ -38,6 +38,35 @@ def _validate_execution(max_workers: int, errors: str) -> None:
         raise ValueError(f"errors must be 'raise' or 'return', got {errors!r}")
 
 
+def _note_failure(
+    error: Exception,
+    position: int,
+    item: Any,
+    label: Callable[[Any], Any] | None,
+    error_context: Callable[[Any], dict[str, Any]] | None,
+) -> None:
+    """Add a note to ``error`` naming the input that raised it.
+
+    The note shows in the traceback on Python 3.11 and later, and is in
+    ``error.__notes__`` on every version.
+    """
+    details: dict[str, Any] = {}
+    try:
+        if label is not None:
+            details["label"] = label(item)
+        if error_context is not None:
+            details.update(error_context(item))
+    except Exception:  # never hide the real error behind a broken describer
+        details = {}
+    shown = ", ".join(f"{key}={value!r}" for key, value in details.items() if value is not None)
+    note = f"batch input {position} failed" + (f": {shown}" if shown else "")
+    add_note = getattr(error, "add_note", None)
+    if callable(add_note):
+        add_note(note)
+    else:  # pragma: no cover - Python 3.10
+        error.__notes__ = [*getattr(error, "__notes__", []), note]  # type: ignore[attr-defined]
+
+
 def _execute(
     inputs: Iterable[I],
     compute: Callable[[I], T],
@@ -105,18 +134,22 @@ class Batch(Generic[I, T]):
     Completed inputs and results are retained, and reading the completed batch
     never starts more work.
 
-    With ``errors="raise"`` (the default), construction raises the first failed
-    input's exception after all inputs finish. With ``errors="return"``, BatchFailure objects
-    occupy their input positions. Only ordinary ``Exception`` subclasses are
-    captured; interrupts propagate.
+    With ``errors="raise"`` (the default), construction raises the first error
+    as soon as it happens: no more inputs start, the computations already
+    running finish, and the original exception is raised with a note naming the
+    failed input's position, label and context. With ``errors="return"``,
+    BatchFailure objects occupy their input positions and every input runs.
+    Only ordinary ``Exception`` subclasses are captured; interrupts propagate.
 
     Args:
         inputs: Inputs to consume and compute once each.
         compute: Function called for each input.
         max_workers: Maximum concurrent computations; defaults to eight.
-        errors: Raise the first error in input order, or retain errors as results.
-        label: Optional input label for failed rows in ``to_df()``.
-        error_context: Optional additional fields for failed rows.
+        errors: Raise the first error to happen, or retain errors as results.
+        label: Optional input label for failed rows in ``to_df()`` and for
+            the note on a raised error.
+        error_context: Optional additional fields for failed rows and for the
+            note on a raised error.
     """
 
     @overload
@@ -173,18 +206,20 @@ class Batch(Generic[I, T]):
         self._label = label
         self._error_context = error_context
 
+        completed: list[tuple[int, _Outcome[I, T]]] = []
         with closing(_execute(inputs, compute, max_workers, ordered=False)) as outcomes:
-            completed = sorted(outcomes, key=lambda pair: pair[0])
+            for position, outcome in outcomes:
+                if outcome.error is not None and errors == "raise":
+                    _note_failure(outcome.error, position, outcome.item, label, error_context)
+                    raise outcome.error
+                completed.append((position, outcome))
+        completed.sort(key=lambda pair: pair[0])
         for _, outcome in completed:
             self._inputs.append(outcome.item)
             if outcome.error is not None:
                 self._results.append(cast("T", BatchFailure(outcome.item, outcome.error)))
             else:
                 self._results.append(cast("T", outcome.value))
-        if errors == "raise":
-            for result in self._results:
-                if isinstance(result, BatchFailure):
-                    raise result.error
 
     @property
     def inputs(self) -> Sequence[I]:
@@ -262,6 +297,8 @@ class BatchStream(Generic[I, T]):
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise"] = "raise",
+        label: Callable[[I], Any] | None = None,
+        error_context: Callable[[I], dict[str, Any]] | None = None,
     ) -> None: ...
 
     @overload
@@ -272,6 +309,8 @@ class BatchStream(Generic[I, T]):
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["return"],
+        label: Callable[[I], Any] | None = None,
+        error_context: Callable[[I], dict[str, Any]] | None = None,
     ) -> None: ...
 
     @overload
@@ -282,6 +321,8 @@ class BatchStream(Generic[I, T]):
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
+        label: Callable[[I], Any] | None = None,
+        error_context: Callable[[I], dict[str, Any]] | None = None,
     ) -> None: ...
 
     def __init__(
@@ -291,18 +332,26 @@ class BatchStream(Generic[I, T]):
         *,
         max_workers: int = DEFAULT_MAX_WORKERS,
         errors: Literal["raise", "return"] = "raise",
+        label: Callable[[I], Any] | None = None,
+        error_context: Callable[[I], dict[str, Any]] | None = None,
     ) -> None:
         _validate_execution(max_workers, errors)
-        self._iterator = self._run(inputs, compute, max_workers, errors)
+        self._iterator = self._run(inputs, compute, max_workers, errors, label, error_context)
 
     @staticmethod
     def _run(
-        inputs: Iterable[I], compute: Callable[[I], T], max_workers: int, errors: str
+        inputs: Iterable[I],
+        compute: Callable[[I], T],
+        max_workers: int,
+        errors: str,
+        label: Callable[[I], Any] | None,
+        error_context: Callable[[I], dict[str, Any]] | None,
     ) -> Generator[T, None, None]:
         with closing(_execute(inputs, compute, max_workers, ordered=True)) as outcomes:
-            for _, outcome in outcomes:
+            for position, outcome in outcomes:
                 if outcome.error is not None:
                     if errors == "raise":
+                        _note_failure(outcome.error, position, outcome.item, label, error_context)
                         raise outcome.error
                     yield cast("T", BatchFailure(outcome.item, outcome.error))
                 else:

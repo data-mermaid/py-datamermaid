@@ -956,4 +956,7 @@ def test_long_records_keep_sources_distinct_for_the_same_site(stac):
     rows = [row for result in results for row in result.to_records()]
     assert [row["source"] for row in rows] == sources
     assert all(row["label"] == "site-1" for row in rows)
-    assert all(row.get("stac") == stac for row in rows)
+    expected = {f"stac_{key}": value for key, value in (stac or {}).items()}
+    assert all(
+        {key: row[key] for key in row if key.startswith("stac_")} == expected for row in rows
+    )

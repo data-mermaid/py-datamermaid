@@ -8,7 +8,7 @@ from typing import Any, Literal, Protocol, TypeAlias, overload
 from urllib.parse import urljoin, urlparse
 
 from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream
-from ..models import ZonalStatsResult
+from ..models import ZonalStatsResult, _stac_columns
 
 
 class StacItemLike(Protocol):
@@ -138,6 +138,14 @@ def resolve_sources(
     return tuple(resolved)
 
 
+def _task_label(task: ZonalTask) -> Any:
+    return task.label
+
+
+def _task_context(task: ZonalTask) -> dict[str, Any]:
+    return {"source": task.source.url, **_stac_columns(task.source.stac)}
+
+
 class ZonalJob:
     """Resolved AOIs and sources; pairs are generated only as workers need them.
 
@@ -239,13 +247,20 @@ class ZonalJob:
     ):
         """Execute eagerly, or stream with bounded memory using stream=True."""
         if stream:
-            return BatchStream(self._tasks(), self._compute, max_workers=max_workers, errors=errors)
+            return BatchStream(
+                self._tasks(),
+                self._compute,
+                max_workers=max_workers,
+                errors=errors,
+                label=_task_label,
+                error_context=_task_context,
+            )
 
         return Batch(
             self._tasks(),
             self._compute,
             max_workers=max_workers,
             errors=errors,
-            label=lambda task: task.label,
-            error_context=lambda task: {"source": task.source.url, "stac": task.source.stac},
+            label=_task_label,
+            error_context=_task_context,
         )

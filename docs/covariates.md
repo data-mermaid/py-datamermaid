@@ -137,7 +137,8 @@ result["grav_NC"]["mean"]
 ```
 
 Each result keeps the item it came from in `result.stac`: the item id, the
-collection, the datetime and the asset key. The other arguments are the same as
+collection, the datetime and the asset key. In `to_df()` these are separate
+columns, such as `stac_item_id` and `stac_datetime`. The other arguments are the same as
 for [`BaseZonalStats.batch`][datamermaid.resources.zonal_stats.BaseZonalStats.batch]:
 `labels`, `max_workers`, `cache`, `errors="return"` and `stream=True`. Route
 options such as `bands`, `approx_stats` and `weighting_method` pass through.

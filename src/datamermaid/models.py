@@ -1041,6 +1041,15 @@ class AggregatedRecord(APIModel):
 # The Zonal Stats service, a separate host answering with dynamic keys.
 
 
+def _stac_columns(stac: Mapping[str, Any] | None) -> dict[str, Any]:
+    """STAC provenance as flat ``stac_<field>`` columns, e.g. ``stac_datetime``.
+
+    Empty for a result with no STAC item.
+    """
+
+    return {f"stac_{key}": value for key, value in (stac or {}).items()}
+
+
 @dataclass(frozen=True)
 class ZonalStatsResult:
     """Statistics for one area of interest against one raster or vector source.
@@ -1132,19 +1141,23 @@ class ZonalStatsResult:
         """Flatten into one wide row: ``label``, ``source``, then ``<band>_<stat>``.
 
         ``label`` is always present (``None`` when the caller gave none) so a
-        DataFrame built from many results has a stable set of columns.
+        DataFrame built from many results has a stable set of columns.  A
+        result from a STAC item also has one ``stac_<field>`` column per
+        [`stac`][..stac] field, such as ``stac_item_id`` and ``stac_datetime``.
         """
 
         row: dict[str, Any] = {"label": self.label, "source": self.source}
-        if self.stac is not None:
-            row["stac"] = dict(self.stac)
+        row.update(_stac_columns(self.stac))
         for band, values in self.stats.items():
             for stat, value in values.items():
                 row[f"{band}_{stat}"] = value
         return row
 
     def to_records(self) -> list[dict[str, Any]]:
-        """One long ``{label, source, band, stat, value}`` row per statistic."""
+        """One long ``{label, source, band, stat, value}`` row per statistic.
+
+        STAC fields are added as ``stac_<field>`` columns, as in [`to_dict`][..to_dict].
+        """
 
         return [
             {
@@ -1153,7 +1166,7 @@ class ZonalStatsResult:
                 "band": band,
                 "stat": stat,
                 "value": value,
-                **({"stac": dict(self.stac)} if self.stac is not None else {}),
+                **_stac_columns(self.stac),
             }
             for band, values in self.stats.items()
             for stat, value in values.items()

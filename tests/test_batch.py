@@ -212,23 +212,52 @@ def test_construction_completes_work_and_reads_do_not_repeat_it():
     assert repr(batch) == "<Batch results=4 max_workers=2>"
 
 
-def test_raise_mode_finishes_all_inputs_then_raises_first_error_in_input_order():
-    second_finished = threading.Event()
-    calls = []
+def test_raise_mode_stops_at_the_first_failure_and_names_the_input():
+    started = []
 
     def compute(value):
-        calls.append(value)
-        if value == 0:
-            assert second_finished.wait(TIMEOUT)
-            raise ValueError("first")
-        if value == 1:
-            second_finished.set()
-            raise ValueError("second")
+        started.append(value)
+        if value == 2:
+            raise ValueError("boom")
         return value
 
-    with pytest.raises(ValueError, match="first"):
-        Batch(range(3), compute, max_workers=2)
-    assert sorted(calls) == [0, 1, 2]
+    with pytest.raises(ValueError, match="boom") as raised:
+        Batch(range(100), compute, max_workers=1, label=lambda value: f"item-{value}")
+    assert started == [0, 1, 2]
+    assert raised.value.__notes__ == ["batch input 2 failed: label='item-2'"]
+
+
+def test_raise_mode_waits_for_work_already_running():
+    release = threading.Event()
+    finished = []
+
+    def compute(value):
+        if value == 0:
+            raise ValueError("first")
+        assert release.wait(TIMEOUT)
+        finished.append(value)
+        return value
+
+    def fail_then_release():
+        with pytest.raises(ValueError, match="first"):
+            Batch(range(2), compute, max_workers=2)
+
+    worker = threading.Thread(target=fail_then_release)
+    worker.start()
+    time.sleep(0.05)
+    assert worker.is_alive(), "raised before in-flight work finished"
+    release.set()
+    worker.join(TIMEOUT)
+    assert finished == [1]
+
+
+def test_a_broken_label_does_not_hide_the_error():
+    def label(value):
+        raise RuntimeError("bad label")
+
+    with pytest.raises(ValueError) as raised:
+        Batch([1], lambda value: int("x"), label=label)
+    assert raised.value.__notes__ == ["batch input 0 failed"]
 
 
 @pytest.mark.parametrize("stream", [False, True])

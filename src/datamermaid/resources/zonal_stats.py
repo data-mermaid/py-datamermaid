@@ -714,9 +714,11 @@ class BaseZonalStats:
                 Failures are never stored.  The key does not cover the source's
                 contents, so clear the cache if the data at a URL changes.  Two
                 workers asking for the same uncached body at once both send it.
-            errors: ``"raise"`` raises the first error in input order after all
-                requests finish; ``"return"`` retains BatchFailure objects with the
-                input task and original exception.
+            errors: ``"raise"`` stops at the first error: no more requests
+                start, the ones running finish, and the original exception is
+                raised with a note naming the failed task's label and source.
+                ``"return"`` runs every request and retains BatchFailure objects
+                with the input task and original exception.
             stats: Statistic names, as for [`stats`][..stats].
             radius: Buffer around a ``Point``, in metres.
             **options: The route's own options, the same as its ``stats`` and

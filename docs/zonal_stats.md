@@ -265,7 +265,8 @@ finishes before an earlier one waits for it. The stream holds at most four times
 `max_workers` pairs that are started but not yet yielded; past that, it waits
 for the earliest one. Consumed results are not kept by the stream. Use the context manager when breaking early: it cancels queued
 work and waits for requests already in flight. With `errors="raise"`, iteration
-raises the original exception and stops scheduling more work. With
+raises the original exception, with a note that names the failed input, and
+stops scheduling more work. With
 `errors="return"`, failures carry their input pair and original exception.
 
 Successful results retain the AOI `label`, resolved `source` URL, and a `stac`
@@ -346,13 +347,19 @@ tells the rows apart once the batch is flattened.
 `source`, then one column per band and statistic, named `band_1_mean`,
 `band_1_count` and so on. It needs the optional `pandas` extra.
 
+A result from a STAC item also has one `stac_` column per field of
+`result.stac`: `stac_item_id`, `stac_collection`, `stac_datetime`,
+`stac_start_datetime`, `stac_end_datetime` and `stac_asset`. The dates are ISO
+8601 strings, as the catalog gives them. Use `pd.to_datetime(frame["stac_datetime"])`
+to parse them.
+
 ```python
 frame = batch.to_df()
 frame[["label", "band_1_mean", "band_1_count"]].head()
 ```
 
 For a tidy frame instead, `to_records()` on one result gives one row per
-statistic, `{label, source, band, stat, value}`. Every row includes `source`,
+statistic, `{label, source, band, stat, value}`, plus the same `stac_` columns. Every row includes `source`,
 including results from plain URLs, so results for the same site remain distinguishable:
 
 ```python
@@ -365,10 +372,17 @@ long_frame.pivot(index="label", columns="stat", values="value")
 
 ### When one area fails
 
-All areas are processed even if some fail. With the default `errors="raise"`,
-`batch(...)` raises the first exception in input order after the work finishes.
-With `errors="return"`, the completed batch contains a `BatchFailure` in place of
-that area's result. Its `.item` identifies the site/source and `.error` holds the
+With the default `errors="raise"`, `batch(...)` stops at the first failure. It
+starts no more requests, waits for the requests already running, and raises the
+original exception. The exception has a note that gives the failed input's
+position, label and source, for example
+`batch input 12 failed: label='site-a', source='https://example.test/depth.tif'`.
+Python 3.11 and later show the note in the traceback. On every version it is in
+`error.__notes__`. The responses that succeeded before the failure are in the
+cache, so a rerun does not send them again.
+
+With `errors="return"`, every area is processed, and the completed batch
+contains a `BatchFailure` in place of each failed area's result. Its `.item` identifies the site/source and `.error` holds the
 original exception:
 
 ```python
@@ -386,8 +400,8 @@ for item in batch:
 ```
 
 `to_df()` in that mode gives a row whose `error` column holds the `BatchFailure`.
-The row keeps its `label`, `source`, and STAC metadata when available; statistic
-columns are empty. A partly failing batch still produces a table.
+The row keeps its `label`, `source`, and `stac_` columns when available;
+statistic columns are empty. A partly failing batch still produces a table.
 
 ### Caching results between batches
 
@@ -482,8 +496,8 @@ So `except MermaidError` around `stats()` catches every failure from the
 service. The local `ValueError` and `TypeError` are not `MermaidError`s.
 
 In a batch, shared options are checked before requests start. Each area of
-interest is validated by its worker. With `errors="raise"`, the first error in
-input order is raised from `batch(...)` after all workers finish. With
+interest is validated by its worker. With `errors="raise"`, the first error to
+happen is raised from `batch(...)` once the requests already running finish. With
 `errors="return"`, an invalid area's `ValueError` or `TypeError` is returned in
 place of its result.
 

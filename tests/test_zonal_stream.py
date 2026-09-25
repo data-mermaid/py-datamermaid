@@ -107,8 +107,9 @@ def test_million_pair_job_is_prepared_without_requests(client):
         result = next(stream)
         assert result["band_1"]["mean"] == 28
         assert result.stac["item_id"] == "item-0"
-        assert result.to_dict()["stac"]["asset"] == "data"
-        assert result.to_records()[0]["stac"]["collection"] == "temperature"
+        assert result.to_dict()["stac_asset"] == "data"
+        assert result.to_dict()["stac_datetime"] == "2026-01-01T00:00:00Z"
+        assert result.to_records()[0]["stac_collection"] == "temperature"
     assert 1 <= route.call_count <= 2
     assert search.calls == 1
 
@@ -246,15 +247,21 @@ def test_a_prepared_job_reruns_from_the_cache(client):
 
 
 @respx.mock
-def test_job_raise_finishes_eager_work_but_stops_stream(client):
+def test_job_raise_stops_at_the_first_failure_and_names_it(client):
     route = respx.post(f"{ZONAL_STATS_URL}raster").respond(200, json={"band_1": {"mean": 28}})
-    job = client.zonal_stats.raster.prepare(["invalid", (1, 2)], url="https://data.test/source")
-    with pytest.raises(TypeError):
+    job = client.zonal_stats.raster.prepare(
+        ["invalid", (1, 2)], labels=["bad-site", "good-site"], url="https://data.test/source"
+    )
+    with pytest.raises(TypeError) as raised:
         job.run(max_workers=1)
-    assert route.call_count == 1
-    with job.run(max_workers=1, stream=True) as results, pytest.raises(TypeError):
+    assert route.call_count == 0
+    assert raised.value.__notes__[-1] == (
+        "batch input 0 failed: label='bad-site', source='https://data.test/source'"
+    )
+    with job.run(max_workers=1, stream=True) as results, pytest.raises(TypeError) as raised:
         next(results)
-    assert route.call_count == 1
+    assert route.call_count == 0
+    assert "label='bad-site'" in raised.value.__notes__[-1]
 
 
 @pytest.mark.parametrize("mode", ["stats", "batch", "stream", "prepare"])
