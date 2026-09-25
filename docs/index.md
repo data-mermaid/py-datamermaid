@@ -136,6 +136,26 @@ The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
 [Zonal Stats service](zonal_stats.md) is a separate public host, so it has its
 own setting and receives no credentials.
 
+## Logging
+
+The SDK logs to the `datamermaid` logger and its children, such as
+`datamermaid.client`. It adds no handler of its own, so nothing is printed until
+your application configures logging:
+
+```python
+import logging
+
+logging.basicConfig(level=logging.INFO)  # retries, throttling, zonal job sizes
+logging.getLogger("datamermaid").setLevel(logging.DEBUG)  # also every response
+```
+
+| Level | What is logged |
+| --- | --- |
+| `DEBUG` | each response, with its method, URL, status and time; zonal stats cache hits |
+| `INFO` | each retry and its reason, a `429` throttle, a token refresh, the size of each zonal stats job |
+
+Log records never include credentials, request headers or request bodies.
+
 ## License
 
 GPLv3. See [LICENSE](https://github.com/data-mermaid/py-datamermaid/blob/main/LICENSE).

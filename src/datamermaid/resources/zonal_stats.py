@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
@@ -95,6 +96,8 @@ from .zonal_job import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..client import MermaidClient
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ZONAL_STATS_ENDPOINTS",
@@ -411,7 +414,9 @@ class BaseZonalStats:
     ) -> ZonalStatsResult:
         key = self._cache_key(body) if cache is not None else ""
         data = cache.get(key) if cache is not None else None
-        if data is None:
+        if data is not None:
+            logger.debug("cache hit for %s, label %r", self.url, label)
+        else:
             # The service is public and lives on another host, so `public=True`
             # sends it neither the client's auth nor its extra headers.
             data = self._client.request_json("POST", self.url, json=body, public=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypeAlias, overload
@@ -9,6 +10,8 @@ from urllib.parse import urljoin, urlparse
 
 from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream
 from ..models import ZonalStatsResult, _stac_columns
+
+logger = logging.getLogger(__name__)
 
 
 class StacItemLike(Protocol):
@@ -246,6 +249,13 @@ class ZonalJob:
         | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
     ):
         """Execute eagerly, or stream with bounded memory using stream=True."""
+        logger.info(
+            "running %d zonal stats requests (%d AOIs x %d sources) on %d workers",
+            self.request_count,
+            len(self._aois),
+            len(self.sources),
+            max_workers,
+        )
         if stream:
             return BatchStream(
                 self._tasks(),

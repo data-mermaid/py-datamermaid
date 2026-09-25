@@ -29,6 +29,8 @@ See the guides at <https://data-mermaid.github.io/py-datamermaid/> for the rest.
 
 from __future__ import annotations
 
+import logging
+
 from ._version import __version__
 from .auth import (
     AnonymousAuth,
@@ -129,6 +131,11 @@ from .resources.zonal_job import (
     ZonalSource,
     ZonalTask,
 )
+
+# A library leaves logging configuration to the application.  With this handler
+# in place, records below the application's threshold are dropped silently
+# instead of reaching Python's last-resort stderr handler.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     "BASE_URL_ENV_VAR",

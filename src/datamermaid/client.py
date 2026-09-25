@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import platform
@@ -58,6 +59,8 @@ ZONAL_STATS_URL_ENV_VAR = "MERMAID_ZONAL_STATS_URL"
 
 DEFAULT_COVARIATES_URL = "https://mermaid.prescient.earth/stac/"
 COVARIATES_URL_ENV_VAR = "MERMAID_COVARIATES_URL"
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
@@ -498,9 +501,11 @@ class MermaidClient:
         """
 
         last_error: Exception | None = None
+        target = httpx.URL(self.base_url).join(url)  # for log messages
         for attempt in range(self.max_retries + 1):
             self._wait_if_throttled()
             response: httpx.Response | None = None
+            started = time.monotonic()
             try:
                 if public:
                     response = self._send_public(method, url, params=params, json=json, **kwargs)
@@ -510,14 +515,33 @@ class MermaidClient:
                 last_error = exc
                 if attempt >= self.max_retries:
                     raise MermaidConnectionError(f"{method} {url} failed: {exc}") from exc
+                reason = f"{type(exc).__name__}: {exc}"
             else:
+                logger.debug(
+                    "%s %s -> %d in %.2fs",
+                    method,
+                    target,
+                    response.status_code,
+                    time.monotonic() - started,
+                )
                 if not (self._should_retry(response.status_code) and attempt < self.max_retries):
                     raise_for_status(response)
                     return response
+                reason = f"status {response.status_code}"
 
             delay = self._retry_delay(attempt, response)
             if response is not None and response.status_code == 429:
                 self._note_throttle(delay)
+                logger.info("throttled by %s; every request waits %.1fs", target.host, delay)
+            logger.info(
+                "retrying %s %s after %s in %.1fs (retry %d of %d)",
+                method,
+                target,
+                reason,
+                delay,
+                attempt + 1,
+                self.max_retries,
+            )
             time.sleep(delay)
 
         # Unreachable: the final attempt either returns or raises above.

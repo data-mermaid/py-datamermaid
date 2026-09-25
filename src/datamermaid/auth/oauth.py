@@ -7,6 +7,7 @@ interactive half to the flows in [`datamermaid.auth.flows`][datamermaid.auth.flo
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
@@ -34,6 +35,8 @@ from .flows import (
     post_form,
 )
 from .token_cache import TokenCache, TokenSet
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["FLOWS", "FlowName", "OAuth", "is_headless", "login", "logout"]
 
@@ -231,7 +234,8 @@ class OAuth(Auth):
             if tokens is not None and tokens.refresh_token is not None:
                 try:
                     self._refresh(tokens)
-                except AuthFlowError:
+                except AuthFlowError as exc:
+                    logger.info("token refresh failed, logging in again: %s", exc)
                     self._tokens = None
                 else:
                     return
@@ -301,6 +305,7 @@ class OAuth(Auth):
 
         if tokens.refresh_token is None:  # pragma: no cover - guarded by callers
             raise AuthFlowError("no refresh token is available")
+        logger.info("refreshing the MERMAID access token")
         with self._session() as ctx:
             payload = post_form(
                 ctx,
