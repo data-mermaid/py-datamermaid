@@ -12,6 +12,18 @@ items, and each item has a `data` asset: a Cloud Optimized GeoTIFF for a raster
 or a GeoParquet file for a vector. The catalog takes no credentials, and the
 client never sends yours to it.
 
+The SDK reads the catalog with
+[pystac-client](https://pystac-client.readthedocs.io). Install it with the
+`covariates` extra:
+
+```bash
+pip install 'datamermaid[covariates]'
+```
+
+Datasets wrap `pystac.Collection` objects and searches are pystac-client
+`ItemSearch` objects, so the pystac documentation applies to them too.
+`client.covariates.catalog` is the pystac-client `Client` itself.
+
 ## See what is available
 
 `collections()` returns every dataset in the catalog. The client fetches the
@@ -46,7 +58,7 @@ client.covariates.to_df("fishing")  # the same filter, as a table
 ```
 
 If you know the id, `collection()` returns that dataset. An unknown id raises
-[`NotFoundError`][datamermaid.exceptions.NotFoundError]:
+`pystac_client.exceptions.APIError`:
 
 ```python
 sst = client.covariates.collection("daily_sst")
@@ -55,16 +67,19 @@ sst = client.covariates.collection("daily_sst")
 ## Read what a dataset holds
 
 A [`CovariateCollection`][datamermaid.resources.covariates.CovariateCollection]
-has the collection's own metadata, and the details of its data file:
+has the collection's own metadata, and the details of its data file. `stac` is
+the `pystac.Collection`, and its attributes also read through the wrapper, so
+`collection.title` and `collection.stac.title` are the same:
 
 | Attribute | What it gives |
 | --- | --- |
-| `id`, `title`, `description`, `keywords` | what the dataset is |
+| `id`, `title`, `description`, `keywords` | what the dataset is, from pystac |
 | `kind` | `"raster"` or `"vector"`: which zonal stats route reads it |
 | `temporal_extent` | the first and last moments covered, as `datetime` values |
 | `bbox` | the spatial extent, `(west, south, east, north)` |
 | `license`, `providers`, `citation` | where it comes from and how to cite it |
-| `data_asset` | the asset with the `data` role, as a [`CovariateAsset`][datamermaid.resources.covariates.CovariateAsset] |
+| `sample_item` | the first item, as a `pystac.Item` |
+| `data_asset` | the sample item's asset with the `data` role, as a `pystac.Asset` |
 | `bands` | for a raster: the unit, scale, offset and nodata value of each band |
 | `classes` | for a categorical raster: class value to label |
 | `columns` | for a vector: the name, type and description of each column |
@@ -140,14 +155,14 @@ with job.run(stream=True, errors="return") as results:
 
 ## Choose dates
 
-`datetime=` selects items by date. Date-only values are widened to whole days,
-because the catalog does not accept them as they are:
+`datetime=` selects items by date, in any form pystac-client accepts.
+pystac-client widens a date-only value to whole days before it sends it:
 
 | You pass | It selects |
 | --- | --- |
 | `"2026"` | all of 2026 |
 | `"2026-05"` | all of May 2026 |
-| `"2026-05-03"` or `date(2026, 5, 3)` | that day |
+| `"2026-05-03"` | that day |
 | `"2026-05-01/2026-05-15"` | those days, inclusive |
 | `("2026-05", None)` or `"2026-05-01/.."` | May 2026 onwards |
 | `"2026-05-03T12:00:00Z"` | that moment |
@@ -158,24 +173,24 @@ set a limit.
 
 ## Search items directly
 
-`client.covariates.search()` returns a lazy
-[`CovariateSearch`][datamermaid.resources.covariates.CovariateSearch]. It sends
-no request until you read from it, and it follows the catalog's pages for you:
+`client.covariates.search()` returns a pystac-client `ItemSearch`. It sends no
+request until you read from it, and it follows the catalog's pages for you:
 
 ```python
 search = client.covariates.search(
     "daily_dhw", datetime="2026-06", bbox=(177.0, -19.5, 180.0, -16.0), max_items=10
 )
-search.count()  # how many items match, from one small request
-for item in search:
-    print(item.id, item.datetime, item.data_asset.href)
+search.matched()  # how many items match, from one small request
+for item in search.items():
+    print(item.id, item.datetime, item.assets["data"].href)
 ```
 
-It also takes `intersects=` (a geometry or a site), `ids=`, a CQL2 JSON
-`filter=` and `sortby=`. `collection.search()` does the same for one dataset.
+It takes the keyword arguments of `pystac_client.Client.search`, such as
+`ids=`, a CQL2 `filter=` and `sortby=`. `intersects=` also takes a
+[`Site`][datamermaid.models.Site]. `collection.search()` does the same for one
+dataset.
 
-A `CovariateSearch` works as `search=` on any zonal stats endpoint, in place of
-a pystac-client `ItemSearch`:
+The search works as `search=` on any zonal stats endpoint:
 
 ```python
 batch = client.zonal_stats.raster.batch(sites, search=search, stats=["max"], radius=500)

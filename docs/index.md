@@ -24,6 +24,8 @@ typed wrapper over it.
     uv add datamermaid
     # with the optional pandas export
     uv add 'datamermaid[pandas]'
+    # with the covariates catalog (pystac-client)
+    uv add 'datamermaid[covariates]'
     ```
 
 === "pip"
@@ -31,6 +33,7 @@ typed wrapper over it.
     ```bash
     pip install datamermaid
     pip install 'datamermaid[pandas]'
+    pip install 'datamermaid[covariates]'
     ```
 
 Python 3.10 or newer is required.

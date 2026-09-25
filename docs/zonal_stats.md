@@ -198,10 +198,10 @@ Celsius to JSONL. See the [example instructions](examples.md#sea-surface-tempera
 ## STAC searches and large jobs
 
 Pass a [pystac-client ItemSearch](https://pystac-client.readthedocs.io/en/latest/usage.html#itemsearch)
-or a [`CovariateSearch`][datamermaid.resources.covariates.CovariateSearch] from
-[`client.covariates`](covariates.md) as `search=`, or supply `sources=` with an iterable of STAC Items, item dictionaries,
-or URLs. Supply exactly one of `url`, `sources`, or `search`. No PySTAC dependency
-is required by the SDK; the adapter uses the search's `items_as_dicts()` method.
+as `search=`, such as one from [`client.covariates.search()`](covariates.md),
+or supply `sources=` with an iterable of STAC Items, item dictionaries, or URLs.
+Supply exactly one of `url`, `sources`, or `search`. The zonal stats endpoints do
+not need PySTAC; the adapter uses the search's `items_as_dicts()` method.
 Strings retain the selected endpoint's URL meaning: item JSON URLs for STAC
 endpoints, data URLs for ordinary raster/vector endpoints.
 

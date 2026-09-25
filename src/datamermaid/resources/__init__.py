@@ -11,11 +11,8 @@ from .aggregated import (
 from .base import BaseResource, ReadOnlyResource, Resource
 from .choices import ChoicesResource
 from .covariates import (
-    CovariateAsset,
     CovariateCollection,
-    CovariateItem,
     Covariates,
-    CovariateSearch,
 )
 from .me import MeResource
 from .project_context import (
@@ -80,10 +77,7 @@ __all__ = [
     "BenthicAttributesResource",
     "BleachingQCFamilyResource",
     "ChoicesResource",
-    "CovariateAsset",
     "CovariateCollection",
-    "CovariateItem",
-    "CovariateSearch",
     "Covariates",
     "FishFamiliesResource",
     "FishGeneraResource",

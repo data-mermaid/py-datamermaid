@@ -6,10 +6,13 @@ habitat maps, market gravity, coastal population and more.  Each dataset is a
 STAC collection, and each collection holds one or more items whose ``data``
 asset is a Cloud Optimized GeoTIFF or a GeoParquet file.
 
-Like the Zonal Stats service, the catalog is a separate public host, resolved
-independently of the client's ``base_url`` (see
-[`MermaidClient`][datamermaid.client.MermaidClient]'s ``covariates_url``).
-Requests to it carry no MERMAID credentials.
+The catalog is read with [pystac-client](https://pystac-client.readthedocs.io),
+installed by the ``covariates`` extra (``pip install 'datamermaid[covariates]'``).
+Collections wrap a ``pystac.Collection`` and searches are plain pystac-client
+``ItemSearch`` objects, so everything pystac offers is still there.  The catalog
+is a public host, resolved independently of the client's ``base_url`` (see
+[`MermaidClient`][datamermaid.client.MermaidClient]'s ``covariates_url``), and
+pystac-client never sees the client's MERMAID credentials.
 
 See what is available:
 
@@ -30,127 +33,50 @@ batch = sst.zonal_stats(sites, datetime="2026-05", stats=["mean"], radius=500)
 frame = batch.to_df()
 ```
 
-A [`CovariateSearch`][datamermaid.resources.covariates.CovariateSearch] is
-also accepted anywhere the zonal stats endpoints take ``search=``.
-
 Values are never rescaled here.  A band's ``scale``, ``offset`` and ``nodata``
 are shown as metadata; the service reading the raster applies them.
 """
 
 from __future__ import annotations
 
-import calendar
-import datetime as dt
-import re
 import threading
-from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream
-from ..exceptions import MermaidConnectionError
 from ..geometry import _geometry_of, _unwrap
-from ..models import ZonalStatsResult, parse_datetime
+from ..models import ZonalStatsResult
 from ..pagination import to_dataframe
-from .base import BaseResource, _normalize_id
+from .base import BaseResource
 from .zonal_job import ZonalJob, ZonalSource, ZonalTask, default_asset, source_from_item
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    import datetime as dt
+
     import pandas
+    import pystac
+    from pystac_client import Client, ItemSearch
+    from pystac_client.item_search import DatetimeLike
 
     from ..client import MermaidClient
     from .zonal_stats import Stat
 
-__all__ = [
-    "CovariateAsset",
-    "CovariateCollection",
-    "CovariateItem",
-    "CovariateSearch",
-    "Covariates",
-    "DatetimeLike",
-]
+__all__ = ["CovariateCollection", "Covariates"]
 
-#: A STAC datetime filter: an RFC 3339 string or interval (``"2026-05-01/2026-05-31"``),
-#: a partial date (``"2026"``, ``"2026-05"``, ``"2026-05-01"``), a ``date``, a
-#: ``datetime``, or a ``(start, end)`` pair where ``None`` leaves that end open.
-DatetimeLike: TypeAlias = (
-    str
-    | dt.date
-    | dt.datetime
-    | tuple[str | dt.date | dt.datetime | None, str | dt.date | dt.datetime | None]
+PYSTAC_INSTALL_HINT = (
+    "client.covariates needs pystac-client; install it with `pip install 'datamermaid[covariates]'`"
 )
-
-#: Items requested per search page.
-DEFAULT_PAGE_SIZE = 100
-
-_PARTIAL_DATE = re.compile(r"^(?P<year>\d{4})(?:-(?P<month>\d{2})(?:-(?P<day>\d{2}))?)?$")
 
 Kind = Literal["raster", "vector"]
 
 
-# -- datetime filters --------------------------------------------------------
-
-
-def _format_instant(value: dt.datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=dt.timezone.utc)
-    return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _bound(value: str | dt.date | dt.datetime | None, *, end: bool) -> str:
-    """One end of an interval, with a partial date widened to the whole period."""
-
-    if value is None:
-        return ".."
-    if isinstance(value, dt.datetime):
-        return _format_instant(value)
-    if isinstance(value, dt.date):
-        return f"{value.isoformat()}T23:59:59Z" if end else f"{value.isoformat()}T00:00:00Z"
-    if not isinstance(value, str):
-        raise TypeError(f"datetime bounds must be strings, dates or datetimes, got {value!r}")
-    text = value.strip()
-    if text in ("", ".."):
-        return ".."
-    match = _PARTIAL_DATE.match(text)
-    if match is None:
-        return text  # a full RFC 3339 timestamp, sent as given
-    year = int(match["year"])
-    month = int(match["month"] or (12 if end else 1))
-    last = calendar.monthrange(year, month)[1] if end else 1
-    day = int(match["day"]) if match["day"] else last
-    moment = dt.date(year, month, day)  # raises ValueError for 2026-13 or 2026-02-30
-    return f"{moment.isoformat()}T23:59:59Z" if end else f"{moment.isoformat()}T00:00:00Z"
-
-
-def stac_datetime(value: DatetimeLike | None) -> str | None:
-    """Normalise ``value`` to the RFC 3339 form a STAC ``/search`` POST requires.
-
-    The catalog rejects date-only strings, so ``"2026-05"`` becomes
-    ``"2026-05-01T00:00:00Z/2026-05-31T23:59:59Z"``.  A full timestamp is left
-    as it is.
-    """
-
-    if value is None:
-        return None
-    if isinstance(value, tuple):
-        if len(value) != 2:
-            raise ValueError("a datetime interval must be a (start, end) pair")
-        return f"{_bound(value[0], end=False)}/{_bound(value[1], end=True)}"
-    if isinstance(value, dt.datetime):
-        return _format_instant(value)
-    if isinstance(value, dt.date):
-        return f"{_bound(value, end=False)}/{_bound(value, end=True)}"
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("datetime must be a non-empty string, a date, a datetime or a pair")
-    if "/" in value:
-        start, _, stop = value.partition("/")
-        return f"{_bound(start, end=False)}/{_bound(stop, end=True)}"
-    if _PARTIAL_DATE.match(value.strip()):
-        return f"{_bound(value, end=False)}/{_bound(value, end=True)}"
-    return value.strip()
-
-
-# -- assets and items ----------------------------------------------------------
+def _require_pystac_client() -> Any:
+    try:
+        import pystac_client
+    except ImportError as exc:  # pragma: no cover - exercised with pystac-client absent
+        raise ImportError(PYSTAC_INSTALL_HINT) from exc
+    return pystac_client
 
 
 def _media_kind(media_type: str | None, href: str | None = None) -> Kind | None:
@@ -167,301 +93,67 @@ def _media_kind(media_type: str | None, href: str | None = None) -> Kind | None:
     return None
 
 
-def _mappings(value: Any) -> tuple[Mapping[str, Any], ...]:
+def _data_asset_key(item: pystac.Item, key: str | None = None) -> str | None:
+    """``key`` if the item has it, else the asset with the ``data`` role, else the first."""
+
+    if key is not None:
+        return key if key in item.assets else None
+    return default_asset({name: asset.to_dict() for name, asset in item.assets.items()})
+
+
+def _geometry_column(columns: Sequence[Mapping[str, Any]]) -> str | None:
+    for column in columns:
+        if column.get("type") == "geometry":
+            return str(column.get("name"))
+    return None
+
+
+def _numeric_columns(columns: Sequence[Mapping[str, Any]]) -> list[str]:
+    numeric = ("int", "uint", "float", "double", "decimal")
+    return [
+        str(column["name"])
+        for column in columns
+        if isinstance(column.get("name"), str)
+        and str(column.get("type", "")).lower().startswith(numeric)
+    ]
+
+
+def _mappings(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        return ()
-    return tuple(dict(entry) for entry in value if isinstance(entry, Mapping))
-
-
-class CovariateAsset:
-    """One asset of a STAC item: a file and what the catalog says about it."""
-
-    def __init__(self, key: str, data: Mapping[str, Any]) -> None:
-        #: The asset's key in the item, e.g. ``"data"``.
-        self.key = key
-        #: The asset as the catalog sent it.
-        self.raw: Mapping[str, Any] = dict(data)
-        #: The file's URL.
-        self.href: str | None = data.get("href")
-        #: The media type, e.g. ``"application/geoparquet"``.
-        self.type: str | None = data.get("type")
-        self.title: str | None = data.get("title")
-        #: STAC roles, ``("data",)`` for the file statistics are computed from.
-        self.roles: tuple[str, ...] = tuple(
-            str(role) for role in data.get("roles") or () if isinstance(role, str)
-        )
-        #: ``raster:bands``: unit, scale, offset, nodata and data type per band.
-        self.bands = _mappings(data.get("raster:bands"))
-        #: ``classification:classes``: the value and label of each class of a
-        #: categorical raster.
-        self.classes = _mappings(data.get("classification:classes"))
-        #: ``table:columns``: name, type and description of each GeoParquet column.
-        self.columns = _mappings(data.get("table:columns"))
-
-    def __repr__(self) -> str:
-        return f"CovariateAsset(key={self.key!r}, type={self.type!r})"
-
-    @property
-    def kind(self) -> Kind | None:
-        """``"raster"`` for a GeoTIFF, ``"vector"`` for GeoParquet, else ``None``."""
-
-        return _media_kind(self.type, self.href)
-
-    @property
-    def geometry_column(self) -> str | None:
-        """The GeoParquet column typed ``geometry``, from ``table:columns``."""
-
-        for column in self.columns:
-            if column.get("type") == "geometry":
-                return str(column.get("name"))
-        return None
-
-    @property
-    def numeric_columns(self) -> list[str]:
-        """The GeoParquet columns holding numbers, the ones worth summarising."""
-
-        numeric = ("int", "uint", "float", "double", "decimal")
-        return [
-            str(column["name"])
-            for column in self.columns
-            if isinstance(column.get("name"), str)
-            and str(column.get("type", "")).lower().startswith(numeric)
-        ]
-
-
-class CovariateItem:
-    """One STAC item: a single date or version of a covariate dataset.
-
-    [`to_dict`][.to_dict] returns the item as the catalog sent it, so a list of
-    items can be passed as ``sources=`` to any zonal stats endpoint.
-    """
-
-    def __init__(self, data: Mapping[str, Any]) -> None:
-        if not isinstance(data, Mapping):
-            raise TypeError(f"expected a STAC item object, got {type(data).__name__}")
-        self._data = dict(data)
-        self.id: str | None = data.get("id")
-        self.collection: str | None = data.get("collection")
-        properties = data.get("properties")
-        self.properties: Mapping[str, Any] = (
-            dict(properties) if isinstance(properties, Mapping) else {}
-        )
-        assets = data.get("assets")
-        self.assets: dict[str, CovariateAsset] = (
-            {
-                str(key): CovariateAsset(str(key), value)
-                for key, value in assets.items()
-                if isinstance(value, Mapping)
-            }
-            if isinstance(assets, Mapping)
-            else {}
-        )
-
-    def __repr__(self) -> str:
-        return f"CovariateItem(id={self.id!r}, collection={self.collection!r})"
-
-    @property
-    def datetime(self) -> dt.datetime | None:
-        """The item's ``datetime``, or its ``start_datetime`` when that is null."""
-
-        value = self.properties.get("datetime") or self.properties.get("start_datetime")
-        try:
-            return parse_datetime(value)
-        except (TypeError, ValueError):
-            return None
-
-    @property
-    def data_asset(self) -> CovariateAsset | None:
-        """The asset with the ``data`` role, else the first asset."""
-
-        key = default_asset(self._data.get("assets") or {})
-        return self.assets.get(key) if key is not None else None
-
-    def to_dict(self) -> dict[str, Any]:
-        """The item as the catalog sent it."""
-
-        return dict(self._data)
-
-
-# -- searching -----------------------------------------------------------------
-
-
-class CovariateSearch:
-    """A lazy STAC item search: nothing is fetched until it is iterated.
-
-    Follows the catalog's ``next`` links page by page.  It has an
-    ``items_as_dicts()`` method, so it can be passed as ``search=`` to any
-    zonal stats endpoint, the same as a pystac-client ``ItemSearch``.
-    """
-
-    def __init__(
-        self,
-        resource: Covariates,
-        body: Mapping[str, Any],
-        *,
-        max_items: int | None = None,
-    ) -> None:
-        if max_items is not None and (
-            isinstance(max_items, bool) or not isinstance(max_items, int) or max_items < 1
-        ):
-            raise ValueError("max_items must be a positive integer")
-        self._resource = resource
-        #: The JSON body POSTed to ``/search``.
-        self.body: dict[str, Any] = dict(body)
-        self.max_items = max_items
-
-    def __repr__(self) -> str:
-        return f"CovariateSearch(body={self.body!r}, max_items={self.max_items!r})"
-
-    @property
-    def url(self) -> str:
-        return f"{self._resource.path}search"
-
-    def _page(self, method: str, url: str, body: Mapping[str, Any] | None) -> Mapping[str, Any]:
-        client = self._resource._client
-        if method == "GET":
-            data = client.request_json("GET", url, public=True)
-        else:
-            data = client.request_json("POST", url, json=dict(body or {}), public=True)
-        if not isinstance(data, Mapping) or not isinstance(data.get("features"), list):
-            raise MermaidConnectionError(f"{method} {url} did not return a STAC FeatureCollection")
-        return data
-
-    def items_as_dicts(self) -> Iterator[dict[str, Any]]:
-        """Every matching item as a plain dict, following pagination."""
-
-        method, url, body = "POST", self.url, dict(self.body)
-        seen = 0
-        while True:
-            page = self._page(method, url, body)
-            for feature in page["features"]:
-                if not isinstance(feature, Mapping):
-                    raise MermaidConnectionError(f"{url} returned a feature that is not an object")
-                yield dict(feature)
-                seen += 1
-                if self.max_items is not None and seen >= self.max_items:
-                    return
-            link = next(
-                (
-                    entry
-                    for entry in page.get("links") or ()
-                    if isinstance(entry, Mapping) and entry.get("rel") == "next"
-                ),
-                None,
-            )
-            if link is None or not page["features"] or not isinstance(link.get("href"), str):
-                return
-            url = link["href"]
-            method = str(link.get("method", "GET")).upper()
-            next_body = link.get("body")
-            if method == "POST":
-                if not isinstance(next_body, Mapping):
-                    body = dict(body)
-                elif link.get("merge"):
-                    body = {**body, **next_body}
-                else:
-                    body = dict(next_body)
-
-    def items(self) -> Iterator[CovariateItem]:
-        """Every matching item, following pagination."""
-
-        for data in self.items_as_dicts():
-            yield CovariateItem(data)
-
-    def __iter__(self) -> Iterator[CovariateItem]:
-        return self.items()
-
-    def count(self) -> int | None:
-        """How many items match, from one small request, or ``None`` if not reported.
-
-        ``max_items`` caps the answer, since that is how many would be read.
-        """
-
-        page = self._page("POST", self.url, {**self.body, "limit": 1})
-        matched = page.get("numberMatched")
-        if matched is None:
-            context = page.get("context")
-            matched = context.get("matched") if isinstance(context, Mapping) else None
-        if not isinstance(matched, int) or isinstance(matched, bool):
-            return None
-        return min(matched, self.max_items) if self.max_items is not None else matched
-
-
-def _search_body(
-    collections: Sequence[str] | None,
-    *,
-    datetime: DatetimeLike | None,
-    bbox: Sequence[float] | None,
-    intersects: Any,
-    ids: Sequence[str] | None,
-    filter: Mapping[str, Any] | None,
-    sortby: Sequence[Mapping[str, str]] | None,
-    limit: int,
-) -> dict[str, Any]:
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-        raise ValueError("limit must be a positive integer")
-    body: dict[str, Any] = {"limit": limit}
-    if collections:
-        body["collections"] = list(collections)
-    stamp = stac_datetime(datetime)
-    if stamp is not None:
-        body["datetime"] = stamp
-    if bbox is not None and intersects is not None:
-        raise ValueError("pass bbox or intersects, not both")
-    if bbox is not None:
-        if isinstance(bbox, (str, bytes)) or len(bbox) not in (4, 6):
-            raise ValueError("bbox must be (west, south, east, north)")
-        body["bbox"] = [float(value) for value in bbox]
-    if intersects is not None:
-        body["intersects"] = dict(_geometry_of(_unwrap(intersects)))
-    if ids is not None:
-        if isinstance(ids, (str, bytes)):
-            raise TypeError("ids must be a sequence of item ids")
-        body["ids"] = list(ids)
-    if filter is not None:
-        body["filter"] = dict(filter)
-        body["filter-lang"] = "cql2-json"
-    if sortby is not None:
-        body["sortby"] = [dict(entry) for entry in sortby]
-    return body
-
-
-# -- collections ---------------------------------------------------------------
-
-
-def _collection_id(value: str | CovariateCollection) -> str:
-    if isinstance(value, CovariateCollection):
-        return value.id
-    return _normalize_id(value, name="collection id")
+        return []
+    return [dict(entry) for entry in value if isinstance(entry, Mapping)]
 
 
 class CovariateCollection:
-    """One covariate dataset: a STAC collection and what it holds.
+    """One covariate dataset: a ``pystac.Collection`` and what it holds.
 
-    The collection document says what the dataset is.  The details of its data
-    file (band units and scaling, class labels, GeoParquet columns) are only on
-    its items, so [`sample_item`][.sample_item] fetches one item the first time
-    any of them is asked for.
+    Attributes of the underlying [`stac`][.stac] collection (``title``,
+    ``description``, ``keywords``, ``license``, ``providers``, ``extent``,
+    ``summaries``, ...) read straight through.  The details of its data file
+    (band units and scaling, class labels, GeoParquet columns) are only on its
+    items, so [`sample_item`][.sample_item] fetches one item the first time any
+    of them is asked for.
     """
 
-    def __init__(self, resource: Covariates, data: Mapping[str, Any]) -> None:
-        if not isinstance(data, Mapping) or not isinstance(data.get("id"), str):
-            raise TypeError("expected a STAC collection object with an id")
+    def __init__(self, resource: Covariates, collection: pystac.Collection) -> None:
         self._resource = resource
-        #: The collection as the catalog sent it.
-        self.raw: Mapping[str, Any] = dict(data)
-        self.id: str = data["id"]
-        self.title: str | None = data.get("title")
-        self.description: str | None = data.get("description")
-        self.keywords: tuple[str, ...] = tuple(
-            str(word) for word in data.get("keywords") or () if isinstance(word, str)
-        )
-        self.license: str | None = data.get("license")
-        self.providers = _mappings(data.get("providers"))
-        self.links = _mappings(data.get("links"))
+        #: The collection as pystac parsed it.
+        self.stac = collection
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for names this class does not define.
+        if name.startswith("_") or name == "stac":
+            raise AttributeError(name)
+        return getattr(self.stac, name)
 
     def __repr__(self) -> str:
-        return f"CovariateCollection(id={self.id!r}, title={self.title!r})"
+        return f"CovariateCollection(id={self.id!r}, title={self.stac.title!r})"
+
+    @property
+    def id(self) -> str:
+        """The collection id, e.g. ``"daily_sst"``."""
+
+        return self.stac.id
 
     # -- what the collection says -------------------------------------------
 
@@ -469,38 +161,29 @@ class CovariateCollection:
     def temporal_extent(self) -> tuple[dt.datetime | None, dt.datetime | None]:
         """The first and last moments covered, ``None`` for an open end."""
 
-        try:
-            interval = self.raw["extent"]["temporal"]["interval"][0]
-            return parse_datetime(interval[0]), parse_datetime(interval[1])
-        except (KeyError, IndexError, TypeError, ValueError):
-            return None, None
-
-    @property
-    def bbox(self) -> tuple[float, ...] | None:
-        """The overall spatial extent, ``(west, south, east, north)``."""
-
-        try:
-            return tuple(float(value) for value in self.raw["extent"]["spatial"]["bbox"][0])
-        except (KeyError, IndexError, TypeError, ValueError):
-            return None
+        start, end = self.stac.extent.temporal.intervals[0]
+        return start, end
 
     @property
     def citation(self) -> str | None:
         """The ``cite-as`` link, else a DOI URL from ``sci:doi``."""
 
-        for link in self.links:
-            if link.get("rel") == "cite-as" and isinstance(link.get("href"), str):
-                return str(link["href"])
-        doi = self.raw.get("sci:doi")
+        link = self.stac.get_single_link("cite-as")
+        if link is not None:
+            return link.href
+        doi = self.stac.extra_fields.get("sci:doi")
         return f"https://doi.org/{doi}" if isinstance(doi, str) else None
 
-    def _asset_hints(self) -> Mapping[str, Any]:
-        """Asset descriptions from ``item_assets`` or ``summaries.assets``, if any."""
+    def _hinted_kind(self) -> Kind | None:
+        """The kind from ``item_assets`` or ``summaries.assets``, without a request."""
 
-        for hints in (self.raw.get("item_assets"), (self.raw.get("summaries") or {}).get("assets")):
+        raw = self.stac.to_dict(include_self_link=False, transform_hrefs=False)
+        for hints in (raw.get("item_assets"), (raw.get("summaries") or {}).get("assets")):
             if isinstance(hints, Mapping) and hints:
-                return hints
-        return {}
+                key = default_asset(hints)
+                if key is not None and isinstance(hints[key], Mapping):
+                    return _media_kind(hints[key].get("type"))
+        return None
 
     @property
     def kind(self) -> Kind | None:
@@ -511,59 +194,55 @@ class CovariateCollection:
         [`data_asset`][..data_asset].
         """
 
-        hints = self._asset_hints()
-        key = default_asset(hints)
-        if key is not None and isinstance(hints[key], Mapping):
-            kind = _media_kind(hints[key].get("type"))
-            if kind is not None:
-                return kind
+        kind = self._hinted_kind()
+        if kind is not None:
+            return kind
         asset = self.data_asset
-        return asset.kind if asset is not None else None
+        return _media_kind(asset.media_type, asset.href) if asset is not None else None
 
     # -- what its items say -------------------------------------------------
 
     @cached_property
-    def sample_item(self) -> CovariateItem | None:
+    def sample_item(self) -> pystac.Item | None:
         """The collection's first item, fetched once, or ``None`` if it has none."""
 
-        for item in self.search(max_items=1, limit=1):
-            return item
-        return None
+        return next(self.search(max_items=1).items(), None)
 
     @property
-    def data_asset(self) -> CovariateAsset | None:
+    def data_asset(self) -> pystac.Asset | None:
         """The sample item's asset with the ``data`` role."""
 
         item = self.sample_item
-        return item.data_asset if item is not None else None
+        key = _data_asset_key(item) if item is not None else None
+        return item.assets[key] if item is not None and key is not None else None
+
+    def _asset_field(self, name: str) -> list[dict[str, Any]]:
+        asset = self.data_asset
+        return _mappings(asset.extra_fields.get(name)) if asset is not None else []
 
     @property
-    def bands(self) -> tuple[Mapping[str, Any], ...]:
+    def bands(self) -> list[dict[str, Any]]:
         """``raster:bands`` of the data asset: unit, scale, offset, nodata per band."""
 
-        asset = self.data_asset
-        return asset.bands if asset is not None else ()
+        return self._asset_field("raster:bands")
 
     @property
     def classes(self) -> dict[Any, str]:
         """Class value to label, for a categorical raster such as habitat or land cover."""
 
-        asset = self.data_asset
-        classes = asset.classes if asset is not None else ()
-        if not classes:
-            summary = (self.raw.get("summaries") or {}).get("label:classes")
-            classes = _mappings(summary)
+        classes = self._asset_field("classification:classes") or _mappings(
+            self.stac.summaries.get_list("label:classes")
+        )
         return {
             entry.get("value"): str(entry.get("description") or entry.get("label") or "")
             for entry in classes
         }
 
     @property
-    def columns(self) -> tuple[Mapping[str, Any], ...]:
+    def columns(self) -> list[dict[str, Any]]:
         """``table:columns`` of a GeoParquet data asset: name, type, description."""
 
-        asset = self.data_asset
-        return asset.columns if asset is not None else ()
+        return self._asset_field("table:columns")
 
     # -- export ---------------------------------------------------------------
 
@@ -575,21 +254,14 @@ class CovariateCollection:
         """
 
         start, end = self.temporal_extent
-        hints = self._asset_hints()
-        key = default_asset(hints)
-        kind = (
-            _media_kind(hints[key].get("type"))
-            if key is not None and isinstance(hints[key], Mapping)
-            else None
-        )
         return {
             "id": self.id,
-            "title": self.title,
-            "kind": kind,
+            "title": self.stac.title,
+            "kind": self._hinted_kind(),
             "start_datetime": start,
             "end_datetime": end,
-            "keywords": list(self.keywords),
-            "license": self.license,
+            "keywords": list(self.stac.keywords or ()),
+            "license": self.stac.license,
         }
 
     def describe(self) -> str:
@@ -600,17 +272,16 @@ class CovariateCollection:
         """
 
         start, end = self.temporal_extent
-        lines = [f"{self.title or self.id} ({self.id})"]
+        lines = [f"{self.stac.title or self.id} ({self.id})"]
         lines.append(f"  kind:      {self.kind or 'unknown'}")
         span = f"{start:%Y-%m-%d}" if start else "open"
         span += f" to {end:%Y-%m-%d}" if end else " to open"
         lines.append(f"  time:      {span}")
-        count = self.search().count()
-        if count is not None:
-            lines.append(f"  items:     {count}")
-        asset = self.data_asset
-        if asset is not None:
-            lines.append(f"  asset:     {asset.key!r} ({asset.type})")
+        lines.append(f"  items:     {self.search().matched()}")
+        item = self.sample_item
+        key = _data_asset_key(item) if item is not None else None
+        if item is not None and key is not None:
+            lines.append(f"  asset:     {key!r} ({item.assets[key].media_type})")
         for index, band in enumerate(self.bands, start=1):
             details = ", ".join(
                 f"{name}={band[name]}"
@@ -630,11 +301,11 @@ class CovariateCollection:
             if column.get("description"):
                 text += f": {column['description']}"
             lines.append(text)
-        if self.keywords:
-            lines.append(f"  keywords:  {', '.join(self.keywords)}")
-        if self.license:
-            lines.append(f"  license:   {self.license}")
-        providers = [str(entry.get("name")) for entry in self.providers if entry.get("name")]
+        if self.stac.keywords:
+            lines.append(f"  keywords:  {', '.join(self.stac.keywords)}")
+        if self.stac.license:
+            lines.append(f"  license:   {self.stac.license}")
+        providers = [provider.name for provider in self.stac.providers or () if provider.name]
         if providers:
             lines.append(f"  providers: {', '.join(providers)}")
         if self.citation:
@@ -643,34 +314,14 @@ class CovariateCollection:
 
     # -- items and statistics -------------------------------------------------
 
-    def search(
-        self,
-        *,
-        datetime: DatetimeLike | None = None,
-        bbox: Sequence[float] | None = None,
-        intersects: Any = None,
-        ids: Sequence[str] | None = None,
-        filter: Mapping[str, Any] | None = None,
-        sortby: Sequence[Mapping[str, str]] | None = None,
-        max_items: int | None = None,
-        limit: int = DEFAULT_PAGE_SIZE,
-    ) -> CovariateSearch:
-        """Search this collection's items.
+    def search(self, **parameters: Any) -> ItemSearch:
+        """A pystac-client ``ItemSearch`` over this collection's items.
 
-        See [`Covariates.search`][datamermaid.resources.covariates.Covariates.search].
+        Takes the keyword arguments of
+        [`Covariates.search`][datamermaid.resources.covariates.Covariates.search].
         """
 
-        return self._resource.search(
-            self.id,
-            datetime=datetime,
-            bbox=bbox,
-            intersects=intersects,
-            ids=ids,
-            filter=filter,
-            sortby=sortby,
-            max_items=max_items,
-            limit=limit,
-        )
+        return self._resource.search(self.id, **parameters)
 
     def _zonal_plan(
         self,
@@ -686,39 +337,40 @@ class CovariateCollection:
         """Pick the route, resolve every matching item's asset, fill vector defaults."""
 
         search = self.search(datetime=datetime, bbox=bbox, ids=ids, max_items=max_items)
-        items = [CovariateItem(data) for data in search.items_as_dicts()]
+        items = list(search.items())
         if not items:
             start, end = self.temporal_extent
             raise ValueError(
                 f"no items in {self.id!r} match the search; the collection covers {start} to {end}"
             )
-        first = items[0]
-        chosen = first.assets.get(asset) if asset is not None else first.data_asset
-        if chosen is None:
+        key = _data_asset_key(items[0], asset)
+        if key is None:
             raise ValueError(f"collection {self.id!r} has no asset {asset!r}")
-        kind = chosen.kind
+        chosen = items[0].assets[key]
+        kind = _media_kind(chosen.media_type, chosen.href)
         zonal = self._resource._client.zonal_stats
         if kind == "raster":
+            if columns is not None:
+                raise TypeError(f"collection {self.id!r} is a raster; columns= is for vectors")
             endpoint: Any = zonal.raster
         elif kind == "vector":
             endpoint = zonal.vector
+            table = _mappings(chosen.extra_fields.get("table:columns"))
             if columns is None:
-                columns = chosen.numeric_columns
+                columns = _numeric_columns(table)
                 if not columns:
                     raise ValueError(
                         f"collection {self.id!r} lists no numeric columns; pass columns="
                     )
             options["columns"] = columns
-            if options.get("geometry_column") is None and chosen.geometry_column:
-                options["geometry_column"] = chosen.geometry_column
+            if options.get("geometry_column") is None:
+                options["geometry_column"] = _geometry_column(table)
         else:
             raise ValueError(
-                f"asset {chosen.key!r} of collection {self.id!r} is {chosen.type!r}, "
+                f"asset {key!r} of collection {self.id!r} is {chosen.media_type!r}, "
                 "neither a GeoTIFF nor GeoParquet"
             )
-        if kind == "raster" and columns is not None:
-            raise TypeError(f"collection {self.id!r} is a raster; columns= is for vectors")
-        sources = [source_from_item(item.to_dict(), chosen.key) for item in items]
+        sources = [source_from_item(item, key) for item in items]
         return endpoint, sources, options
 
     def prepare_zonal_stats(
@@ -873,9 +525,9 @@ class CovariateCollection:
         Args:
             aois: One area of interest or many, as the zonal stats ``batch``
                 methods take them: sites, GeoJSON, a GeoDataFrame.
-            datetime: Which items to use; see
-                [`DatetimeLike`][datamermaid.resources.covariates.DatetimeLike].
-                Leave it out for a dataset with a single item.
+            datetime: Which items to use, in any form pystac-client accepts:
+                ``"2026-05"``, ``"2026-05-01/2026-05-15"``, a ``datetime`` or a
+                ``(start, end)`` pair.  Leave it out for a dataset with one item.
             bbox: Only items intersecting ``(west, south, east, north)``.
             ids: Only these item ids.
             max_items: Read at most this many items.
@@ -924,15 +576,13 @@ class CovariateCollection:
         return result
 
 
-# -- the catalog ---------------------------------------------------------------
-
-
 class Covariates(BaseResource):
     """The covariates catalog, as ``client.covariates``.
 
     [`path`][datamermaid.resources.base.BaseResource.path] is the absolute STAC
-    API root.  The list of collections is fetched once per client and kept;
-    pass ``refresh=True`` to fetch it again.
+    API root, and [`catalog`][.catalog] is the pystac-client ``Client`` opened
+    on it.  The list of collections is fetched once per client and kept; pass
+    ``refresh=True`` to fetch it again.
     """
 
     def __init__(self, client: MermaidClient) -> None:
@@ -941,56 +591,37 @@ class Covariates(BaseResource):
         self._lock = threading.Lock()
         self._collections: list[CovariateCollection] | None = None
 
+    @cached_property
+    def catalog(self) -> Client:
+        """The pystac-client ``Client`` for the catalog, opened on first use."""
+
+        catalog: Client = _require_pystac_client().Client.open(self.path)
+        return catalog
+
     def collections(self, *, refresh: bool = False) -> list[CovariateCollection]:
         """Every dataset in the catalog, in the catalog's order."""
 
         with self._lock:
             if self._collections is None or refresh:
-                self._collections = self._fetch_collections()
+                self._collections = [
+                    CovariateCollection(self, collection)
+                    for collection in self.catalog.get_collections()
+                ]
             return list(self._collections)
-
-    def _fetch_collections(self) -> list[CovariateCollection]:
-        url: str | None = f"{self.path}collections"
-        found: list[CovariateCollection] = []
-        while url is not None:
-            data = self._client.request_json("GET", url, public=True)
-            entries = data.get("collections") if isinstance(data, Mapping) else None
-            if not isinstance(entries, list):
-                raise MermaidConnectionError(f"GET {url} did not return a list of collections")
-            found.extend(
-                self._decode_response(entry, lambda raw: CovariateCollection(self, raw), url)
-                for entry in entries
-            )
-            url = next(
-                (
-                    link["href"]
-                    for link in data.get("links") or ()
-                    if isinstance(link, Mapping)
-                    and link.get("rel") == "next"
-                    and isinstance(link.get("href"), str)
-                ),
-                None,
-            )
-            if not entries:
-                break
-        return found
 
     def collection(self, collection_id: str) -> CovariateCollection:
         """One dataset by its exact id, e.g. ``"daily_sst"``.
 
         Raises:
-            NotFoundError: If the catalog has no such collection.
+            pystac_client.exceptions.APIError: If the catalog has no such collection.
         """
 
-        wanted = _collection_id(collection_id)
         with self._lock:
             cached = self._collections
         for collection in cached or ():
-            if collection.id == wanted:
+            if collection.id == collection_id:
                 return collection
-        url = self._url("collections", wanted).rstrip("/")
-        data = self._client.request_json("GET", url, public=True)
-        return self._decode_response(data, lambda raw: CovariateCollection(self, raw), url)
+        return CovariateCollection(self, self.catalog.get_collection(collection_id))
 
     def search_collections(self, query: str) -> list[CovariateCollection]:
         """Datasets whose id or title contains ``query``, ignoring case.
@@ -1005,7 +636,8 @@ class Covariates(BaseResource):
         return [
             collection
             for collection in self.collections()
-            if needle in collection.id.casefold() or needle in (collection.title or "").casefold()
+            if needle in collection.id.casefold()
+            or needle in (collection.stac.title or "").casefold()
         ]
 
     def to_df(self, query: str | None = None, **kwargs: Any) -> pandas.DataFrame:
@@ -1017,49 +649,30 @@ class Covariates(BaseResource):
     def search(
         self,
         collections: str | CovariateCollection | Sequence[str | CovariateCollection] | None = None,
-        *,
-        datetime: DatetimeLike | None = None,
-        bbox: Sequence[float] | None = None,
-        intersects: Any = None,
-        ids: Sequence[str] | None = None,
-        filter: Mapping[str, Any] | None = None,
-        sortby: Sequence[Mapping[str, str]] | None = None,
-        max_items: int | None = None,
-        limit: int = DEFAULT_PAGE_SIZE,
-    ) -> CovariateSearch:
-        """A lazy item search, usable as ``search=`` on any zonal stats endpoint.
+        **parameters: Any,
+    ) -> ItemSearch:
+        """A pystac-client ``ItemSearch``, usable as ``search=`` on any zonal stats endpoint.
 
         Args:
             collections: A collection id or
                 [`CovariateCollection`][datamermaid.resources.covariates.CovariateCollection],
                 or several.
-            datetime: A date, a partial date such as ``"2026-05"``, an RFC 3339
-                interval or a ``(start, end)`` pair.  Date-only values are
-                widened to whole days, which the catalog requires.
-            bbox: ``(west, south, east, north)``.
-            intersects: A geometry the items must intersect: GeoJSON, a
-                ``__geo_interface__`` object or a [`Site`][datamermaid.models.Site].
-            ids: Item ids.
-            filter: A CQL2 JSON filter.
-            sortby: STAC sort fields, e.g. ``[{"field": "datetime", "direction": "asc"}]``.
-            max_items: Stop after this many items.
-            limit: Items per page.
+            **parameters: The other keyword arguments of
+                ``pystac_client.Client.search``: ``datetime``, ``bbox``,
+                ``ids``, ``filter``, ``sortby``, ``max_items``, ``limit``, ...
+                ``intersects`` also takes a [`Site`][datamermaid.models.Site]
+                or any ``__geo_interface__`` object.  ``None`` values are left out.
         """
 
-        if collections is None:
-            names: list[str] | None = None
-        elif isinstance(collections, (str, CovariateCollection)):
-            names = [_collection_id(collections)]
-        else:
-            names = [_collection_id(entry) for entry in collections]
-        body = _search_body(
-            names,
-            datetime=datetime,
-            bbox=bbox,
-            intersects=intersects,
-            ids=ids,
-            filter=filter,
-            sortby=sortby,
-            limit=limit,
-        )
-        return CovariateSearch(self, body, max_items=max_items)
+        if isinstance(collections, (str, CovariateCollection)):
+            collections = [collections]
+        if collections is not None:
+            parameters["collections"] = [
+                entry.id if isinstance(entry, CovariateCollection) else entry
+                for entry in collections
+            ]
+        if parameters.get("intersects") is not None:
+            parameters["intersects"] = dict(_geometry_of(_unwrap(parameters["intersects"])))
+        parameters = {key: value for key, value in parameters.items() if value is not None}
+        search: ItemSearch = self.catalog.search(**parameters)
+        return search

@@ -24,12 +24,15 @@ Python SDK for the [MERMAID](https://datamermaid.org/) coral reef monitoring API
 uv add datamermaid
 # with the optional pandas export
 uv add 'datamermaid[pandas]'
+# with the covariates catalog (pystac-client)
+uv add 'datamermaid[covariates]'
 ```
 
 Or with pip:
 
 ```bash
 pip install 'datamermaid[pandas]'
+pip install 'datamermaid[covariates]'
 ```
 
 Python 3.10 or newer is required.
@@ -327,7 +330,8 @@ shows incremental JSONL output and failure handling.
 `client.covariates` lists the datasets in the public
 [MERMAID covariates catalog](https://mermaid.prescient.earth/stac), such as daily
 sea surface temperature, bleaching heat stress and market gravity, and computes
-zonal statistics from them:
+zonal statistics from them. It reads the catalog with pystac-client, which the
+`covariates` extra installs:
 
 ```python
 client.covariates.search_collections("bleaching")  # by id or title

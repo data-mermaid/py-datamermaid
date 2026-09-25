@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["datamermaid"]
+# dependencies = ["datamermaid[covariates]"]
 #
 # [tool.uv.sources]
 # datamermaid = { path = "..", editable = true }
