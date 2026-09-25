@@ -1,12 +1,16 @@
 name: Docs
 
+# The site is published only when a release tag is pushed, like the package in
+# `release.yml`, so the docs always match the latest release. Pull requests
+# still build the site to catch broken docs before they merge.
 on:
   push:
-    branches: [main]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
   pull_request:
   workflow_dispatch:
 
-# Superseded pull request builds are worth cancelling; a run on `main` is not,
+# Superseded pull request builds are worth cancelling; a release run is not,
 # because cancelling it here would take the deploy job down with it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,7 +32,7 @@ jobs:
           enable-cache: true
 
       - name: Set up Node
-        if: github.ref == 'refs/heads/main'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -40,7 +44,7 @@ jobs:
       # is git-ignored, and `repomix.config.json` ignores `repomix-output.*`, so
       # a pack is never committed and never packs a previous pack.
       - name: Pack the repository for LLMs
-        if: github.ref == 'refs/heads/main'
+        if: startsWith(github.ref, 'refs/tags/v')
         run: npx -y repomix@1 --output docs/repomix-output.xml
 
       # `--strict` turns a broken link, an orphaned page or a cross-reference to
@@ -57,7 +61,7 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
