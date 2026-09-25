@@ -230,12 +230,16 @@ def test_raise_mode_stops_at_the_first_failure_and_names_the_input():
 
 
 def test_raise_mode_waits_for_work_already_running():
+    started = threading.Event()
     release = threading.Event()
     finished = []
 
     def compute(value):
         if value == 0:
+            # Fail only once input 1 is running, so it is in flight, not queued.
+            assert started.wait(TIMEOUT)
             raise ValueError("first")
+        started.set()
         assert release.wait(TIMEOUT)
         finished.append(value)
         return value
