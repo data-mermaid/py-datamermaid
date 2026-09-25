@@ -336,7 +336,6 @@ pandas = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
-    { name = "pystac-client" },
     { name = "pytest" },
     { name = "respx" },
     { name = "ruff" },
@@ -358,7 +357,6 @@ provides-extras = ["pandas", "covariates"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.11" },
-    { name = "pystac-client", specifier = ">=0.8" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "respx", specifier = ">=0.21" },
     { name = "ruff", specifier = ">=0.6" },

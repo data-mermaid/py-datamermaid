@@ -81,7 +81,7 @@ Kind = Literal["raster", "vector"]
 def _require_pystac_client() -> Any:
     try:
         import pystac_client
-    except ImportError as exc:  # pragma: no cover - exercised with pystac-client absent
+    except ImportError as exc:
         raise ImportError(PYSTAC_INSTALL_HINT) from exc
     return pystac_client
 

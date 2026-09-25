@@ -592,6 +592,13 @@ uv run ruff format .       # format (CI runs it with --check)
 uv run mypy src            # type check
 ```
 
+CI also runs the tests once without the optional extras, where the tests that
+need pandas or pystac-client skip. To do the same locally:
+
+```bash
+uv sync && uv run pytest   # no extras; `uv sync --all-extras` puts them back
+```
+
 The source is in `src/datamermaid/`:
 
 - `client.py`: `MermaidClient`. It wraps an `httpx.Client` and owns the base

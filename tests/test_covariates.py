@@ -12,6 +12,9 @@ import json
 import httpx
 import pytest
 import respx
+
+pytest.importorskip("pystac_client", reason="needs the covariates extra")
+
 from pystac_client import ItemSearch
 from pystac_client.exceptions import APIError
 
