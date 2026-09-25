@@ -42,12 +42,14 @@ are shown as metadata; the service reading the raster applies them.
 
 from __future__ import annotations
 
+import difflib
+import inspect
 import threading
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream
+from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream, _validate_execution
 from ..geometry import _geometry_of, _unwrap
 from ..models import ZonalStatsResult
 from ..pagination import to_dataframe
@@ -129,6 +131,39 @@ def _mappings(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         return []
     return [dict(entry) for entry in value if isinstance(entry, Mapping)]
+
+
+#: Items asked for per catalog page.  The server's default page is often ten
+#: items, which makes a year of daily data 37 requests.
+SEARCH_PAGE_SIZE = 1000
+
+
+def _matched(page: Mapping[str, Any]) -> int | None:
+    """The count of matching items a search page reports, if it reports one."""
+    context = page.get("context")
+    found = page.get("numberMatched")
+    if found is None and isinstance(context, Mapping):
+        found = context.get("matched")
+    return found if isinstance(found, int) and not isinstance(found, bool) else None
+
+
+def _check_route_options(endpoint: Any, options: Mapping[str, Any], method: str) -> None:
+    """Raise ``TypeError`` for an option the endpoint's ``prepare`` does not take."""
+
+    # The source arguments are chosen here from the catalog, never by the caller.
+    allowed = set(inspect.signature(endpoint.prepare).parameters) - {
+        "aois",
+        "url",
+        "sources",
+        "search",
+    }
+    for name in options:
+        if name not in allowed:
+            close = difflib.get_close_matches(name, sorted(allowed), n=1)
+            hint = f". Did you mean {close[0]!r}?" if close else ""
+            raise TypeError(
+                f"CovariateCollection.{method}() got an unexpected keyword argument {name!r}{hint}"
+            )
 
 
 class CovariateCollection:
@@ -213,7 +248,8 @@ class CovariateCollection:
     def sample_item(self) -> pystac.Item | None:
         """The collection's first item, fetched once, or ``None`` if it has none."""
 
-        return next(self.search(max_items=1).items(), None)
+        # Without ``limit`` the server picks the page size, often ten items.
+        return next(self.search(max_items=1, limit=1).items(), None)
 
     @property
     def data_asset(self) -> pystac.Asset | None:
@@ -340,28 +376,28 @@ class CovariateCollection:
         asset: str | None,
         columns: Sequence[str] | None,
         options: dict[str, Any],
+        method: str,
     ) -> tuple[Any, list[ZonalSource], dict[str, Any]]:
         """Pick the route, resolve every matching item's asset, fill vector defaults."""
 
-        search = self.search(datetime=datetime, bbox=bbox, ids=ids, max_items=max_items)
+        search = self.search(
+            datetime=datetime, bbox=bbox, ids=ids, max_items=max_items, limit=SEARCH_PAGE_SIZE
+        )
         items = list(search.items())
         if not items:
-            start, end = self.temporal_extent
-            raise ValueError(
-                f"no items in {self.id!r} match the search; the collection covers {start} to {end}"
-            )
+            raise self._no_items()
         key = _data_asset_key(items[0], asset)
         if key is None:
             raise ValueError(f"collection {self.id!r} has no asset {asset!r}")
         chosen = items[0].assets[key]
         kind = _media_kind(chosen.media_type, chosen.href)
-        zonal = self._resource._client.zonal_stats
+        endpoint = self._endpoint(kind)
+        if endpoint is not None:
+            _check_route_options(endpoint, options, method)
         if kind == "raster":
             if columns is not None:
                 raise TypeError(f"collection {self.id!r} is a raster; columns= is for vectors")
-            endpoint: Any = zonal.raster
         elif kind == "vector":
-            endpoint = zonal.vector
             table = _mappings(chosen.extra_fields.get("table:columns"))
             if columns is None:
                 columns = _numeric_columns(table)
@@ -379,6 +415,35 @@ class CovariateCollection:
             )
         sources = [source_from_item(item, key) for item in items]
         return endpoint, sources, options
+
+    def _endpoint(self, kind: Kind | None) -> Any:
+        """The zonal stats endpoint that reads ``kind``, or ``None``."""
+
+        zonal = self._resource._client.zonal_stats
+        return {"raster": zonal.raster, "vector": zonal.vector}.get(kind) if kind else None
+
+    def _check_options_early(self, options: Mapping[str, Any], method: str) -> None:
+        """Reject an unknown route option before any catalog request, when the kind is known."""
+
+        endpoint = self._endpoint(self._hinted_kind())
+        if endpoint is not None:
+            _check_route_options(endpoint, options, method)
+
+    def _no_items(self) -> ValueError:
+        start, end = self.temporal_extent
+        return ValueError(
+            f"no items in {self.id!r} match the search; the collection covers {start} to {end}"
+        )
+
+    def _too_many(self, aois: int, items: int, max_requests: int, *, at_least: bool) -> ValueError:
+        return ValueError(
+            f"{aois} AOI{'s' if aois != 1 else ''} against "
+            f"{'at least ' if at_least else ''}"
+            f"{items} items of {self.id!r} is more than max_requests={max_requests} "
+            "requests; narrow datetime=, bbox= or ids=, set max_items=, or raise "
+            "max_requests= (collection.search(datetime=...).matched() counts the items "
+            "in one small request)"
+        )
 
     def prepare_zonal_stats(
         self,
@@ -402,6 +467,7 @@ class CovariateCollection:
         statistics requests, so ``job.request_count`` can be checked first.
         """
 
+        self._check_options_early(options, "prepare_zonal_stats")
         endpoint, sources, options = self._zonal_plan(
             datetime=datetime,
             bbox=bbox,
@@ -410,6 +476,7 @@ class CovariateCollection:
             asset=asset,
             columns=columns,
             options=options,
+            method="prepare_zonal_stats",
         )
         job: ZonalJob = endpoint.prepare(
             aois,
@@ -562,10 +629,10 @@ class CovariateCollection:
             stream: ``True`` returns a ``BatchStream`` with bounded memory.
             max_requests: Refuse to start when the AOIs times the matching
                 items exceed this many requests; ``None`` removes the limit.
-                The item search stops once the limit is certain to be passed,
-                so an unbounded search costs few catalog requests.  Use
-                [`prepare_zonal_stats`][..prepare_zonal_stats] to see the count
-                first.
+                The check first asks the catalog for its count of matching
+                items with a one-item page, so a job over the limit costs one
+                small catalog request.  ``search(...).matched()`` gives the
+                count on its own.
             **options: Other route options, e.g. ``bands`` and ``approx_stats``
                 for rasters or ``weighting_method`` for vectors.
 
@@ -575,15 +642,32 @@ class CovariateCollection:
                 to, or the job would send more than ``max_requests`` requests.
         """
 
-        aois = _expand_aois(aois)
+        _validate_execution(max_workers, errors)
         if max_requests is not None:
             if isinstance(max_requests, bool) or not isinstance(max_requests, int):
                 raise TypeError("max_requests must be an integer or None")
             if max_requests < 1:
                 raise ValueError("max_requests must be >= 1")
-            # One item past what the limit allows is enough to know it is passed.
-            cap = max_requests // max(len(aois), 1) + 1
-            max_items = cap if max_items is None else min(max_items, cap)
+        self._check_options_early(options, "zonal_stats")
+        aois = _expand_aois(aois)
+        capped = False
+        if max_requests is not None:
+            # A one-item page is enough to read the catalog's count of matches.
+            probe = self.search(datetime=datetime, bbox=bbox, ids=ids, limit=1)
+            page = next(probe.pages_as_dicts(), {})
+            if not page.get("features"):
+                raise self._no_items()
+            matched = _matched(page)
+            if matched is not None:
+                count = matched if max_items is None else min(matched, max_items)
+                if len(aois) * count > max_requests:
+                    raise self._too_many(len(aois), count, max_requests, at_least=False)
+            else:
+                # The catalog reports no count: one item past what the limit
+                # allows is enough to know it is passed.
+                cap = max_requests // max(len(aois), 1) + 1
+                capped = max_items is None or cap < max_items
+                max_items = cap if max_items is None else min(max_items, cap)
         endpoint, sources, options = self._zonal_plan(
             datetime=datetime,
             bbox=bbox,
@@ -592,14 +676,14 @@ class CovariateCollection:
             asset=asset,
             columns=columns,
             options=options,
+            method="zonal_stats",
         )
         if max_requests is not None and len(aois) * len(sources) > max_requests:
-            raise ValueError(
-                f"{len(aois)} AOI{'s' if len(aois) != 1 else ''} against "
-                f"{'at least ' if len(sources) == max_items else ''}"
-                f"{len(sources)} items of {self.id!r} is more than max_requests={max_requests} "
-                "requests; narrow datetime=, bbox= or ids=, set max_items=, or raise "
-                "max_requests= (prepare_zonal_stats shows the count without sending any)"
+            raise self._too_many(
+                len(aois),
+                len(sources),
+                max_requests,
+                at_least=capped and len(sources) == max_items,
             )
         result: (
             Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]

@@ -115,6 +115,35 @@ def test_million_pair_job_is_prepared_without_requests(client):
 
 
 @respx.mock
+def test_streamed_failure_rows_share_the_success_row_layout(client):
+    respx.post(f"{ZONAL_STATS_URL}raster").mock(
+        side_effect=[
+            httpx.Response(200, json={"band_1": {"mean": 28}}),
+            httpx.Response(422, json={"detail": "bad aoi"}),
+        ]
+    )
+    with client.zonal_stats.raster_stac.batch(
+        [(1, 2)],
+        search=Search(),
+        asset="data",
+        labels=["a"],
+        errors="return",
+        stream=True,
+        max_workers=1,
+    ) as stream:
+        success, failure = (result.to_dict() for result in stream)
+    assert isinstance(failure, dict)
+    identifying = {key: value for key, value in success.items() if not key.startswith("band_")}
+    assert set(identifying) <= set(failure)
+    assert failure["label"] == "a"
+    assert failure["stac_item_id"] == "item-1"
+    assert failure["source"] == "https://data.test/1.tif?token=signed"
+    assert failure["error_type"] == "MermaidAPIError"
+    assert "bad aoi" in failure["error"]
+    json.dumps(failure)
+
+
+@respx.mock
 def test_search_cartesian_order_and_signed_urls(client):
     route = respx.post(f"{ZONAL_STATS_URL}raster").respond(200, json={"band_1": {"mean": 28}})
     with client.zonal_stats.raster_stac.batch(

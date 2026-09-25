@@ -318,6 +318,7 @@ def test_details_come_from_one_sample_item(client, stac):
     assert sst.bands == [{"unit": "degrees_Celsius", "scale": 0.01, "nodata": -32768.0}]
     assert route.call_count == 1
     assert search_bodies(route)[0]["collections"] == ["daily_sst"]
+    assert search_bodies(route)[0]["limit"] == 1
 
     text = sst.describe()
     assert "kind:      raster" in text
@@ -538,8 +539,9 @@ def test_zonal_stats_refuses_a_job_over_max_requests(client, stac):
     with pytest.raises(ValueError, match=r"at least 3 items .* max_requests=4"):
         sst.zonal_stats([(178.4, -18.1), (178.5, -18.1)], max_requests=4)
 
+    # A one-item probe finds no count, then one page capped at three items.
     assert zonal.call_count == 0
-    assert route.call_count == 1
+    assert [body["limit"] for body in search_bodies(route)] == [1, 3]
 
 
 def test_zonal_stats_runs_within_max_requests(client, stac):
@@ -551,6 +553,101 @@ def test_zonal_stats_runs_within_max_requests(client, stac):
 
     assert len(batch) == 4
     assert zonal.call_count == 4
+
+
+def test_a_reported_count_refuses_after_one_catalog_request(client, stac):
+    # The catalog says 15,168 items match but serves them ten at a time.
+    page = features(*(sst_item(day) for day in range(1, 11)), matched=15_168)
+    page["links"] = [{"rel": "next", "href": SEARCH_URL, "method": "POST", "body": {}}]
+    route = mock_search(stac, page)
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    with pytest.raises(ValueError, match=r"1 AOI against 15168 items .* max_requests=10000"):
+        sst.zonal_stats([(178.4, -18.1)])
+
+    # The count comes from a one-item page, not a full page of items.
+    assert [body["limit"] for body in search_bodies(route)] == [1]
+    assert zonal.call_count == 0
+
+
+def test_a_reported_count_within_the_limit_then_fetches_the_items(client, stac):
+    route = mock_search(stac, features(sst_item(1), sst_item(2), matched=2))
+    stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    assert len(sst.zonal_stats([(178.4, -18.1)], max_requests=2)) == 2
+    assert [body["limit"] for body in search_bodies(route)] == [1, 1000]
+
+
+def test_an_empty_probe_raises_before_fetching_items(client, stac):
+    route = mock_search(stac, features())
+    sst = client.covariates.collection("daily_sst")
+
+    with pytest.raises(ValueError, match="no items"):
+        sst.zonal_stats([(178.4, -18.1)], datetime="1900")
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error", "match"),
+    [
+        ({"max_workers": 0}, ValueError, "max_workers"),
+        ({"errors": "retrun"}, ValueError, "errors"),
+        ({"bandz": [1]}, TypeError, r"zonal_stats\(\) got .* 'bandz'. Did you mean 'bands'\?"),
+        ({"url": "https://x.test/a.tif"}, TypeError, "'url'"),
+    ],
+)
+def test_zonal_stats_checks_arguments_before_searching(client, stac, kwargs, error, match):
+    route = mock_search(stac, features(sst_item(1)))
+    sst = client.covariates.collection("daily_sst")
+
+    with pytest.raises(error, match=match):
+        sst.zonal_stats([(178.4, -18.1)], **kwargs)
+    assert route.call_count == 0
+
+
+def test_prepare_zonal_stats_checks_vector_options_before_searching(client, stac):
+    route = mock_search(stac, features(GRAVITY_ITEM))
+    gravity = client.covariates.collection("market_gravity")
+
+    with pytest.raises(TypeError, match=r"prepare_zonal_stats\(\) .* 'weighting_method'"):
+        gravity.prepare_zonal_stats([(178.4, -18.1)], weighting="area")
+    assert route.call_count == 0
+
+
+def test_options_are_checked_after_the_search_without_a_kind_hint(client, stac):
+    # daily_baa describes no assets, so the route is only known from its items.
+    baa_item = sst_item(1)
+    baa_item["collection"] = "daily_baa"
+    route = mock_search(stac, features(baa_item))
+    baa = client.covariates.collection("daily_baa")
+
+    with pytest.raises(TypeError, match=r"CovariateCollection.zonal_stats\(\) .* 'bandz'"):
+        baa.zonal_stats([(178.4, -18.1)], bandz=[1])
+    assert route.call_count == 2
+
+
+def test_a_reported_count_is_capped_by_max_items(client, stac):
+    mock_search(stac, features(sst_item(1), sst_item(2), matched=15_168))
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    batch = sst.zonal_stats([(178.4, -18.1)], max_items=2, max_requests=4)
+
+    assert len(batch) == 2
+    assert zonal.call_count == 2
+
+
+def test_item_searches_ask_for_large_pages(client, stac):
+    route = mock_search(stac, features(sst_item(1)))
+    stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    sst.zonal_stats([(178.4, -18.1)], max_requests=None)
+    sst.prepare_zonal_stats([(178.4, -18.1)], max_items=5)
+
+    assert [body["limit"] for body in search_bodies(route)] == [1000, 5]
 
 
 def test_max_requests_none_removes_the_limit(client, stac):

@@ -241,22 +241,17 @@ arrives. Keep the client open throughout consumption:
 
 ```python
 import json
-from datamermaid import BatchFailure
 
 with job.run(stream=True, max_workers=8, errors="return") as results:
     with open("zonal-results.jsonl", "w") as output:
         for result in results:
-            if isinstance(result, BatchFailure):
-                row = {
-                    "label": result.item.label,
-                    "source": result.item.source.url,
-                    "stac": result.item.source.stac,
-                    "error": str(result.error),
-                }
-            else:
-                row = result.to_dict()
-            output.write(json.dumps(row) + "\n")
+            output.write(json.dumps(result.to_dict()) + "\n")
 ```
+
+A `BatchFailure` has a `to_dict()` too. Its row has the same `label`,
+`source` and `stac_<field>` columns as a successful row, plus `error` (the
+message) and `error_type` (the exception's class name), so
+`pandas.read_json("zonal-results.jsonl", lines=True)` gives one flat table.
 
 The stream starts work on iteration and yields in AOI order, then source order
 within each AOI. It keeps `max_workers` requests running: when one finishes, the
@@ -399,9 +394,11 @@ for item in batch:
         print(item.label, item["band_1"]["mean"])
 ```
 
-`to_df()` in that mode gives a row whose `error` column holds the `BatchFailure`.
-The row keeps its `label`, `source`, and `stac_` columns when available;
-statistic columns are empty. A partly failing batch still produces a table.
+`to_df()` in that mode gives a failed row the error message in its `error`
+column and the exception's class name, such as `MermaidAPIError`, in
+`error_type`. The row keeps its `label`, `source`, and `stac_` columns when
+available; statistic columns are empty. A partly failing batch still produces a
+table. The failure itself, with the original exception, is still in the batch.
 
 ### Caching results between batches
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import pickle
 import threading
 import time
 
@@ -165,11 +167,11 @@ def test_to_df_follows_the_error_mode():
 
     frame = Batch(range(3), failing, errors="return").to_df()
     assert len(frame) == 3
-    assert list(frame.columns) == ["label", "score", "error"]
+    assert list(frame.columns) == ["label", "score", "error", "error_type"]
     assert frame["score"].tolist()[0] == 0
     assert frame["score"].tolist()[2] == 20
     assert pandas.isna(frame.loc[1, "score"])
-    assert isinstance(frame.loc[1, "error"].error, ValueError)
+    assert frame.loc[1, "error_type"] == "ValueError"
     assert frame["error"].isna().tolist() == [True, False, True]
 
 
@@ -183,7 +185,7 @@ def test_to_df_labels_failed_rows_when_given_a_label_function():
 
     frame = Batch(range(3), failing, errors="return", label=lambda value: value).to_df()
     assert frame["label"].tolist() == [0, 1, 2]
-    assert isinstance(frame.loc[1, "error"].error, ValueError)
+    assert frame.loc[1, "error_type"] == "ValueError"
 
 
 def test_to_df_reports_pandas_missing():
@@ -419,3 +421,14 @@ def test_worker_type_is_rejected_without_consuming_input(executor, workers):
 
     with pytest.raises(TypeError, match="max_workers"):
         executor(inputs(), lambda value: value, max_workers=workers)
+
+
+def test_failures_survive_pickling_and_copying():
+    failure = datamermaid.BatchFailure("task-1", ValueError("bad band"), {"label": "site-a"})
+
+    for clone in (pickle.loads(pickle.dumps(failure)), copy.copy(failure), copy.deepcopy(failure)):
+        assert clone.item == "task-1"
+        assert isinstance(clone.error, ValueError)
+        assert str(clone.error) == "bad band"
+        assert clone.details == {"label": "site-a"}
+        assert clone.to_dict() == failure.to_dict()

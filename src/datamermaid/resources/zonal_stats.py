@@ -78,7 +78,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMappin
 from dataclasses import replace
 from enum import Enum
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypeAlias, TypedDict, overload
 
 from ..batch import DEFAULT_MAX_WORKERS, Batch, BatchFailure, BatchStream, _validate_execution
 from ..exceptions import MermaidConnectionError
@@ -346,6 +346,64 @@ def _check_url(url: Any) -> str:
     if not isinstance(url, str) or not url.strip():
         raise ValueError("url must be a non-empty string")
     return url
+
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from typing_extensions import Unpack
+
+# The result types and route options below exist at runtime, so
+# ``typing.get_type_hints`` resolves the ``batch`` signatures and a test can
+# compare each options dict with its route's ``prepare`` signature.
+_Eager: TypeAlias = Batch[ZonalTask, ZonalStatsResult]
+_Streamed: TypeAlias = BatchStream[ZonalTask, ZonalStatsResult]
+_EagerOrFailed: TypeAlias = Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+_StreamedOrFailed: TypeAlias = BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
+
+
+class _BatchOptions(TypedDict, total=False):
+    """The ``batch`` arguments every route shares, bar ``stream`` and ``errors``."""
+
+    url: str | None
+    sources: Iterable[SourceInput] | None
+    search: StacSearchLike | None
+    labels: Iterable[Any] | None
+    max_workers: int
+    cache: MutableMapping[str, Any] | bool | None
+    stats: Iterable[Stat | str] | None
+    radius: float | None
+
+
+class _RasterBatchOptions(_BatchOptions, total=False):
+    bands: Sequence[int] | None
+    approx_stats: bool
+
+
+class _RasterStacBatchOptions(_RasterBatchOptions, total=False):
+    asset: str | None
+
+
+class _VectorRequired(TypedDict):
+    # A separate total class, since ``Required`` is not in ``typing`` on 3.10.
+    columns: Sequence[str]
+
+
+class _VectorBatchOptions(_BatchOptions, _VectorRequired, total=False):
+    geometry_column: str | None
+    weighting_method: WeightingMethod | str | None
+    approx_stats: bool
+
+
+class _VectorStacBatchOptions(_VectorBatchOptions, total=False):
+    asset: str | None
+
+
+#: Each route's ``batch`` options, checked against its ``prepare`` by the tests.
+BATCH_OPTIONS: dict[str, type] = {
+    "raster": _RasterBatchOptions,
+    "raster/stac": _RasterStacBatchOptions,
+    "vector": _VectorBatchOptions,
+    "vector/stac": _VectorStacBatchOptions,
+}
 
 
 class BaseZonalStats:
@@ -739,17 +797,24 @@ class BaseZonalStats:
         """
 
         _validate_execution(max_workers, errors)
-        job = self.prepare(
-            aois,
-            url=url,
-            sources=sources,
-            search=search,
-            labels=labels,
-            stats=stats,
-            radius=radius,
-            cache=cache,
-            **options,
-        )
+        try:
+            job = self.prepare(
+                aois,
+                url=url,
+                sources=sources,
+                search=search,
+                labels=labels,
+                stats=stats,
+                radius=radius,
+                cache=cache,
+                **options,
+            )
+        except TypeError as exc:
+            # No deeper frame means the arguments did not bind to `prepare`
+            # (an unknown or missing option), so name the method the caller used.
+            if exc.__traceback__ is None or exc.__traceback__.tb_next is not None:
+                raise
+            raise TypeError(str(exc).replace("prepare()", "batch()")) from None
         return job.run(max_workers=max_workers, errors=errors, stream=stream)
 
     def __call__(self, aoi: GeometryLike, *, url: str, **kwargs: Any) -> ZonalStatsResult:
@@ -806,6 +871,83 @@ class RasterStats(BaseZonalStats):
             approx_stats=approx_stats,
             cache=cache,
         )
+
+    @overload  # type: ignore[override]
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_RasterBatchOptions],
+    ) -> _Eager: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_RasterBatchOptions],
+    ) -> _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_RasterBatchOptions],
+    ) -> _Eager | _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_RasterBatchOptions],
+    ) -> _EagerOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_RasterBatchOptions],
+    ) -> _StreamedOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_RasterBatchOptions],
+    ) -> _EagerOrFailed | _StreamedOrFailed: ...
+
+    def batch(self, aois: Any, **options: Any) -> _EagerOrFailed | _StreamedOrFailed:
+        """One statistics request per AOI and Cloud Optimized GeoTIFF.
+
+        Takes the arguments of ``BaseZonalStats.batch`` (``url``, ``sources``,
+        ``search``, ``stream``, ``labels``, ``max_workers``, ``cache``,
+        ``errors``, ``stats`` and ``radius``) plus the route options below.
+        A type checker catches a misspelled or missing option.
+
+        Args:
+            aois: The areas of interest, as for ``BaseZonalStats.batch``.
+            bands: 1-based band indices to read.  Omitted, the service reads
+                band 1.
+            approx_stats: Read overviews for faster, approximate values.
+        """
+        result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
+        return result
 
     def stats(  # type: ignore[override]
         self,
@@ -905,6 +1047,84 @@ class RasterStacStats(RasterStats):
             approx_stats=approx_stats,
             cache=cache,
         )
+
+    @overload  # type: ignore[override]
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_RasterStacBatchOptions],
+    ) -> _Eager: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_RasterStacBatchOptions],
+    ) -> _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_RasterStacBatchOptions],
+    ) -> _Eager | _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_RasterStacBatchOptions],
+    ) -> _EagerOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_RasterStacBatchOptions],
+    ) -> _StreamedOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_RasterStacBatchOptions],
+    ) -> _EagerOrFailed | _StreamedOrFailed: ...
+
+    def batch(self, aois: Any, **options: Any) -> _EagerOrFailed | _StreamedOrFailed:
+        """One statistics request per AOI and STAC Item raster asset.
+
+        Takes the arguments of ``BaseZonalStats.batch`` (``url``, ``sources``,
+        ``search``, ``stream``, ``labels``, ``max_workers``, ``cache``,
+        ``errors``, ``stats`` and ``radius``) plus the route options below.
+        A type checker catches a misspelled or missing option.
+
+        Args:
+            aois: The areas of interest, as for ``BaseZonalStats.batch``.
+            bands: 1-based band indices to read.  Omitted, the service reads
+                band 1.
+            approx_stats: Read overviews for faster, approximate values.
+            asset: Key of the raster asset to read.
+        """
+        result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
+        return result
 
     def stats(  # type: ignore[override]
         self,
@@ -1009,6 +1229,87 @@ class VectorStats(BaseZonalStats):
             approx_stats=approx_stats,
             cache=cache,
         )
+
+    @overload  # type: ignore[override]
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_VectorBatchOptions],
+    ) -> _Eager: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_VectorBatchOptions],
+    ) -> _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_VectorBatchOptions],
+    ) -> _Eager | _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_VectorBatchOptions],
+    ) -> _EagerOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_VectorBatchOptions],
+    ) -> _StreamedOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_VectorBatchOptions],
+    ) -> _EagerOrFailed | _StreamedOrFailed: ...
+
+    def batch(self, aois: Any, **options: Any) -> _EagerOrFailed | _StreamedOrFailed:
+        """One statistics request per AOI and GeoParquet file.
+
+        Takes the arguments of ``BaseZonalStats.batch`` (``url``, ``sources``,
+        ``search``, ``stream``, ``labels``, ``max_workers``, ``cache``,
+        ``errors``, ``stats`` and ``radius``) plus the route options below.
+        A type checker catches a misspelled or missing option.
+
+        Args:
+            aois: The areas of interest, as for ``BaseZonalStats.batch``.
+            columns: Numeric columns to summarise.  Required and non-empty.
+            geometry_column: Name of the geometry column.  Omitted, the service
+                uses ``geometry``.
+            weighting_method: How intersecting features are weighted, a
+                ``WeightingMethod`` or its name.  Omitted, the service weights
+                by ``area``.
+            approx_stats: Reserved by the service for a future optimisation.
+        """
+        result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
+        return result
 
     def stats(  # type: ignore[override]
         self,
@@ -1127,6 +1428,88 @@ class VectorStacStats(VectorStats):
             approx_stats=approx_stats,
             cache=cache,
         )
+
+    @overload  # type: ignore[override]
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_VectorStacBatchOptions],
+    ) -> _Eager: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_VectorStacBatchOptions],
+    ) -> _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise"] = "raise",
+        **options: Unpack[_VectorStacBatchOptions],
+    ) -> _Eager | _Streamed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[False] = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_VectorStacBatchOptions],
+    ) -> _EagerOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: Literal[True],
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_VectorStacBatchOptions],
+    ) -> _StreamedOrFailed: ...
+
+    @overload
+    def batch(
+        self,
+        aois: Any,
+        *,
+        stream: bool = False,
+        errors: Literal["raise", "return"] = "raise",
+        **options: Unpack[_VectorStacBatchOptions],
+    ) -> _EagerOrFailed | _StreamedOrFailed: ...
+
+    def batch(self, aois: Any, **options: Any) -> _EagerOrFailed | _StreamedOrFailed:
+        """One statistics request per AOI and STAC Item GeoParquet asset.
+
+        Takes the arguments of ``BaseZonalStats.batch`` (``url``, ``sources``,
+        ``search``, ``stream``, ``labels``, ``max_workers``, ``cache``,
+        ``errors``, ``stats`` and ``radius``) plus the route options below.
+        A type checker catches a misspelled or missing option.
+
+        Args:
+            aois: The areas of interest, as for ``BaseZonalStats.batch``.
+            columns: Numeric columns to summarise.  Required and non-empty.
+            asset: Key of the GeoParquet asset to read.
+            geometry_column: Name of the geometry column.  Omitted, the service
+                uses ``geometry``.
+            weighting_method: How intersecting features are weighted, a
+                ``WeightingMethod`` or its name.  Omitted, the service weights
+                by ``area``.
+            approx_stats: Reserved by the service for a future optimisation.
+        """
+        result: _EagerOrFailed | _StreamedOrFailed = super().batch(aois, **options)
+        return result
 
     def stats(  # type: ignore[override]
         self,

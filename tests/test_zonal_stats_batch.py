@@ -253,6 +253,17 @@ def test_batch_rejects_bad_options_before_any_request(client):
         assert respx.calls.call_count == 0
 
 
+def test_a_misspelled_or_missing_option_names_batch_not_prepare(client):
+    with respx.mock:
+        with pytest.raises(
+            TypeError, match=r"batch\(\) got an unexpected keyword argument 'bandz'"
+        ):
+            client.zonal_stats.raster.batch(POINTS, url=COG, bandz=[1])
+        with pytest.raises(TypeError, match=r"batch\(\) missing 1 required keyword-only argument"):
+            client.zonal_stats.vector.batch(POINTS, url=COG)
+        assert respx.calls.call_count == 0
+
+
 # -- to_df ------------------------------------------------------------------
 
 
@@ -281,7 +292,7 @@ def test_to_df_keeps_the_label_of_a_failed_aoi(client):
     ).to_df()
 
     assert frame["label"].tolist() == ["a", "b", "c"]
-    assert isinstance(frame.loc[1, "error"].error, ValueError)
+    assert frame.loc[1, "error_type"] == "ValueError"
     assert frame["error"].isna().tolist() == [True, False, True]
 
 

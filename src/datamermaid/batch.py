@@ -38,6 +38,23 @@ def _validate_execution(max_workers: int, errors: str) -> None:
         raise ValueError(f"errors must be 'raise' or 'return', got {errors!r}")
 
 
+def _describe(
+    item: Any,
+    label: Callable[[Any], Any] | None,
+    error_context: Callable[[Any], dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """The label and context fields of a failed input, or ``{}`` if a describer fails."""
+    details: dict[str, Any] = {}
+    try:
+        if label is not None:
+            details["label"] = label(item)
+        if error_context is not None:
+            details.update(error_context(item))
+    except Exception:  # never hide the real error behind a broken describer
+        return {}
+    return details
+
+
 def _note_failure(
     error: Exception,
     position: int,
@@ -50,14 +67,7 @@ def _note_failure(
     The note shows in the traceback on Python 3.11 and later, and is in
     ``error.__notes__`` on every version.
     """
-    details: dict[str, Any] = {}
-    try:
-        if label is not None:
-            details["label"] = label(item)
-        if error_context is not None:
-            details.update(error_context(item))
-    except Exception:  # never hide the real error behind a broken describer
-        details = {}
+    details = _describe(item, label, error_context)
     shown = ", ".join(f"{key}={value!r}" for key, value in details.items() if value is not None)
     note = f"batch input {position} failed" + (f": {shown}" if shown else "")
     add_note = getattr(error, "add_note", None)
@@ -203,8 +213,6 @@ class Batch(Generic[I, T]):
         self._results: list[T] = []
         self.max_workers = max_workers
         self.errors = errors
-        self._label = label
-        self._error_context = error_context
 
         completed: list[tuple[int, _Outcome[I, T]]] = []
         with closing(_execute(inputs, compute, max_workers, ordered=False)) as outcomes:
@@ -217,7 +225,10 @@ class Batch(Generic[I, T]):
         for _, outcome in completed:
             self._inputs.append(outcome.item)
             if outcome.error is not None:
-                self._results.append(cast("T", BatchFailure(outcome.item, outcome.error)))
+                failure = BatchFailure(
+                    outcome.item, outcome.error, _describe(outcome.item, label, error_context)
+                )
+                self._results.append(cast("T", failure))
             else:
                 self._results.append(cast("T", outcome.value))
 
@@ -249,32 +260,47 @@ class Batch(Generic[I, T]):
         return list(self._results)
 
     def to_df(self, **kwargs: Any) -> pandas.DataFrame:
-        """Export completed results, with an ``error`` column for failed rows.
+        """Export completed results, with ``error`` and ``error_type`` columns for failed rows.
 
-        Successful results use their ``to_dict()`` representation. Failed rows
-        retain their input label if supplied. Requires the optional pandas extra.
+        Successful results use their ``to_dict()`` representation, and failed
+        rows use [`BatchFailure.to_dict`][datamermaid.batch.BatchFailure.to_dict]:
+        the input's label and context, the error message and the exception's
+        class name.  Requires the optional pandas extra.
         """
-        rows: list[Any] = []
-        for item, result in zip(self._inputs, self._results, strict=True):
-            if isinstance(result, BatchFailure):
-                row: dict[str, Any] = {"error": result}
-                if self._label is not None:
-                    row["label"] = self._label(item)
-                if self._error_context is not None:
-                    row.update(self._error_context(item))
-                rows.append(row)
-            else:
-                rows.append(result)
+        rows = [
+            result.to_dict() if isinstance(result, BatchFailure) else result
+            for result in self._results
+        ]
         return to_dataframe(rows, **kwargs)
 
 
 class BatchFailure(Exception, Generic[I]):
-    """A batch failure retaining the input and original exception."""
+    """A batch failure retaining the input and original exception.
 
-    def __init__(self, item: I, error: Exception) -> None:
+    ``details`` holds the input's label and context, the same fields a
+    successful row carries for it (for a zonal stats task: ``label``,
+    ``source`` and the ``stac_<field>`` columns).
+    """
+
+    def __init__(self, item: I, error: Exception, details: dict[str, Any] | None = None) -> None:
         super().__init__(str(error))
         self.item = item
         self.error = error
+        self.details: dict[str, Any] = dict(details or {})
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        # `args` holds only the message, so rebuild from the real arguments;
+        # otherwise pickling and `copy.copy` fail.
+        return (type(self), (self.item, self.error, self.details))
+
+    def to_dict(self) -> dict[str, Any]:
+        """One row: ``details``, then the ``error`` message and ``error_type``.
+
+        The row has the same identifying columns as a successful result's
+        ``to_dict()``, so success and failure rows written to one file or
+        DataFrame share a layout.
+        """
+        return {**self.details, "error": str(self.error), "error_type": type(self.error).__name__}
 
 
 class BatchStream(Generic[I, T]):
@@ -353,7 +379,8 @@ class BatchStream(Generic[I, T]):
                     if errors == "raise":
                         _note_failure(outcome.error, position, outcome.item, label, error_context)
                         raise outcome.error
-                    yield cast("T", BatchFailure(outcome.item, outcome.error))
+                    details = _describe(outcome.item, label, error_context)
+                    yield cast("T", BatchFailure(outcome.item, outcome.error, details))
                 else:
                     yield cast("T", outcome.value)
 

@@ -5,6 +5,43 @@ All notable changes to `datamermaid` are listed here. The format follows
 [semantic versioning](https://semver.org/). Before 1.0, a minor release can
 change behavior.
 
+## [Unreleased]
+
+### Added
+
+- `BatchFailure.to_dict()`. Its row has the same `label`, `source` and
+  `stac_<field>` columns as a successful result's row, plus `error` and
+  `error_type`, so streamed success and failure rows share one layout.
+- The typed `batch()` of each zonal stats endpoint lists its route options in
+  its docstring, so `help()` and Jupyter show them, and
+  `typing.get_type_hints()` resolves its signature.
+
+### Fixed
+
+- `BatchFailure` can be pickled and copied, so a `Batch` returned with
+  `errors="return"` can be cached or sent to another process.
+- `CovariateCollection.sample_item`, and so `kind`, `bands`, `columns` and
+  `describe()`, fetch one item instead of a page of the server's default size.
+
+### Changed
+
+- `batch()` on each zonal stats endpoint is typed with that route's options
+  again. A type checker catches a misspelled option, such as `bandz=`, or a
+  missing `columns=`. The runtime error names `batch()`, not `prepare()`.
+- `Batch.to_df()` puts the error message in the `error` column and the
+  exception's class name in a new `error_type` column. Before, `error` held the
+  `BatchFailure` object, so the frame could not be written to JSON or Parquet.
+- `CovariateCollection.zonal_stats()` checks `max_requests` against the count
+  of matching items that the catalog reports for a one-item page. A job over
+  the limit now costs one small catalog request (about 9 KB), not up to about
+  1,000 requests. Item searches then ask for 1,000 items per page, so a year of
+  daily data is one page, not 37. A search that matches nothing raises before
+  it fetches items.
+- `CovariateCollection.zonal_stats()` and `prepare_zonal_stats()` check
+  `max_workers`, `errors` and the route options before they search the catalog.
+  An unknown option raises `TypeError` that names the method called and
+  suggests the closest option, such as `bands` for `bandz`.
+
 ## [0.2.0] - 2026-09-25
 
 ### Added
@@ -57,6 +94,7 @@ change behavior.
 
 - First release.
 
+[Unreleased]: https://github.com/data-mermaid/py-datamermaid/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/data-mermaid/py-datamermaid/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/data-mermaid/py-datamermaid/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/data-mermaid/py-datamermaid/releases/tag/v0.1.0

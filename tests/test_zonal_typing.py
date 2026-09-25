@@ -1,7 +1,13 @@
 """Public preparation signatures reject bad options during static checking."""
 
+import inspect
 import subprocess
 import sys
+import typing
+
+import pytest
+
+from datamermaid.resources.zonal_stats import BATCH_OPTIONS, ZONAL_STATS_ENDPOINTS
 
 from .conftest import REPO_ROOT
 
@@ -152,6 +158,20 @@ client.zonal_stats.raster.prepare([], bands="1")  # type: ignore[arg-type]
 client.zonal_stats.raster_stac.prepare([], asset=123)  # type: ignore[arg-type]
 client.zonal_stats.vector.prepare([])  # type: ignore[call-arg]
 client.zonal_stats.vector_stac.prepare([], columns=["depth"], typo=True)  # type: ignore[call-arg]
+client.zonal_stats.raster.batch([], url="https://example.test", bands=[1], max_workers=2)
+client.zonal_stats.raster_stac.batch([], url="https://example.test", asset="data", bands=[1])
+client.zonal_stats.vector.batch([], url="https://example.test", columns=["depth"], cache=False)
+client.zonal_stats.vector_stac.batch(
+    [], url="https://example.test", columns=["depth"], asset="data", weighting_method="ratio"
+)
+URL = "https://example.test"
+client.zonal_stats.raster.batch([], url=URL, bandz=[1])  # type: ignore[call-overload]
+client.zonal_stats.raster.batch([], url=URL, asset="data")  # type: ignore[call-overload]
+client.zonal_stats.raster.batch([], url=URL, bands="1")  # type: ignore[arg-type]
+client.zonal_stats.vector.batch([], url=URL)  # type: ignore[call-overload]
+client.zonal_stats.vector_stac.batch(  # type: ignore[call-overload]
+    [], url="https://example.test", columns=["depth"], typo=True
+)
 """)
     checked = subprocess.run(
         [
@@ -169,3 +189,22 @@ client.zonal_stats.vector_stac.prepare([], columns=["depth"], typo=True)  # type
         check=False,
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+@pytest.mark.parametrize(("name", "endpoint"), ZONAL_STATS_ENDPOINTS)
+def test_batch_options_match_prepare(name, endpoint):
+    # The typed `batch` options are written out by hand; they must stay the
+    # keyword arguments of `prepare`, plus `max_workers`, which only runs take.
+    options = BATCH_OPTIONS[endpoint.route]
+    parameters = inspect.signature(endpoint.prepare).parameters
+    keywords = {key for key, value in parameters.items() if value.kind is value.KEYWORD_ONLY}
+    required = {key for key in keywords if parameters[key].default is inspect.Parameter.empty}
+
+    assert options.__required_keys__ | options.__optional_keys__ == keywords | {"max_workers"}
+    assert options.__required_keys__ == required
+
+
+@pytest.mark.parametrize(("name", "endpoint"), ZONAL_STATS_ENDPOINTS)
+def test_batch_hints_resolve_at_runtime(name, endpoint):
+    assert "return" in typing.get_type_hints(endpoint.batch)
+    assert "columns" in (endpoint.batch.__doc__ or "") or "bands" in (endpoint.batch.__doc__ or "")

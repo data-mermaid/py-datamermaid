@@ -197,22 +197,18 @@ def main() -> int:
         )
 
         # With `errors="return"` nothing here raises: each failed site comes
-        # back as a row whose `error` column holds the exception.
+        # back as a row with the message in `error` and the exception's class
+        # name in `error_type`.
         frame = batch.to_df()
 
-    errors = frame.get("error")
-    if (
-        errors is not None
-        and errors.map(
-            lambda error: (
-                isinstance(error, BatchFailure) and isinstance(error.error, MermaidConnectionError)
-            )
-        ).all()
+    if all(
+        isinstance(result, BatchFailure) and isinstance(result.error, MermaidConnectionError)
+        for result in batch
     ):
         # Every request failed to connect, so the service itself is down or
         # the URL is wrong.  One message reads better than a table of failures.
         print(
-            f"\nThe Zonal Stats service could not be reached: {errors.iloc[0]}",
+            f"\nThe Zonal Stats service could not be reached: {frame['error'].iloc[0]}",
             file=sys.stderr,
         )
         return 0
@@ -223,12 +219,10 @@ def main() -> int:
     frame = frame.drop(columns=["label", "source"], errors="ignore")
 
     failed = 0
-    if "error" in frame:
-        reasons = frame["error"].map(
-            lambda error: type(error.error).__name__ if isinstance(error, BatchFailure) else None
-        )
-        frame["error"] = reasons
-        failed = int(reasons.notna().sum())
+    if "error_type" in frame:
+        # The class name is short enough for a table; the message is not.
+        frame["error"] = frame.pop("error_type")
+        failed = int(frame["error"].notna().sum())
     print(f"\nStatistics  ({len(frame)} rows x {len(frame.columns)} columns, {failed} failed)")
     print(frame.head(20).to_string(index=False))
 

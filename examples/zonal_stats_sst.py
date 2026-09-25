@@ -126,16 +126,10 @@ def main() -> int:
                 job.run(stream=True, max_workers=args.max_workers, errors="return") as results,
             ):
                 for result in results:
+                    row = result.to_dict()
                     if isinstance(result, BatchFailure):
                         failed += 1
-                        row = {
-                            "label": result.item.label,
-                            "source": result.item.source.url,
-                            "stac": result.item.source.stac,
-                            "error": str(result.error),
-                        }
                     else:
-                        row = result.to_dict()
                         # The service already applies CoralTemp's 0.01 scale
                         # factor. Do not multiply the returned mean again.
                         row["sst_mean_celsius"] = result["band_1"].get("mean")

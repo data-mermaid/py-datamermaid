@@ -151,10 +151,12 @@ the collection covers.
 A daily dataset over a long period gives many requests: 100 sites over 365 days
 is 36,500. `zonal_stats()` sends at most `max_requests` requests, 10,000 by
 default. If the areas of interest times the matching items is more than that, it
-raises `ValueError` before it sends any statistics requests. The item search also
-stops as soon as the limit is certain to be passed, so leaving out `datetime` on
-a daily dataset costs few catalog requests. Narrow the search, or pass a larger
-`max_requests`. `max_requests=None` removes the limit.
+raises `ValueError` before it sends any statistics requests. The check first
+asks the catalog for its count of matching items with a one-item page, so a job
+over the limit costs one small catalog request. Items are then fetched 1,000 to
+a page. Narrow the search, or pass a larger `max_requests`. `max_requests=None`
+removes the limit. To see the count on its own, call
+`sst.search(datetime="2026").matched()`.
 
 `prepare_zonal_stats()` takes the same arguments, fetches the items, and sends
 no statistics requests. It has no limit, so use it to see the count of a large
