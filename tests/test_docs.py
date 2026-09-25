@@ -261,14 +261,16 @@ def test_readme_and_pyproject_link_the_published_docs():
     assert url in (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 
-def test_the_workflow_builds_strictly_and_deploys_from_main():
-    """A pull request that breaks the docs has to fail before it can merge."""
+def test_the_workflow_builds_strictly_and_deploys_from_release_tags():
+    """A pull request that breaks the docs has to fail before it can merge, and
+    the site is only published when a release tag is pushed."""
 
     workflow = (REPO_ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     assert "uv run --group docs mkdocs build --strict" in workflow
     assert "pull_request" in workflow
     assert "actions/deploy-pages" in workflow
-    assert "refs/heads/main" in workflow
+    assert "refs/tags/v" in workflow
+    assert "refs/heads/main" not in workflow
 
 
 def test_docs_dependency_group_exists():
