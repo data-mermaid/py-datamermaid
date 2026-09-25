@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from datamermaid import BatchFailure, BatchStream
+from datamermaid.batch import READAHEAD
 
 from .conftest import ZONAL_STATS_URL
 
@@ -42,11 +43,11 @@ def test_stream_is_lazy_bounded_and_closes():
     assert consumed == []
     with stream:
         assert next(stream) == 0
-        assert consumed == [0, 1, 2]
         assert next(stream) == 2
-        assert consumed == [0, 1, 2, 3]
+        assert len(consumed) <= 3 * READAHEAD
     assert list(stream) == []
-    assert len(consumed) == 4
+    assert consumed == list(range(len(consumed)))
+    assert len(consumed) <= 3 * READAHEAD
 
 
 def test_stream_preserves_order_with_concurrent_workers():

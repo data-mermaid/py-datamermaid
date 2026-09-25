@@ -258,10 +258,12 @@ with job.run(stream=True, max_workers=8, errors="return") as results:
             output.write(json.dumps(row) + "\n")
 ```
 
-The stream starts work on iteration, retains at most `max_workers` pending
-calculations, and yields in AOI order, then source order within each AOI. An early
-slow request can delay delivery of later results. Consumed results are not kept
-by the stream. Use the context manager when breaking early: it cancels queued
+The stream starts work on iteration and yields in AOI order, then source order
+within each AOI. It keeps `max_workers` requests running: when one finishes, the
+next starts, even while an earlier request is still running. A result that
+finishes before an earlier one waits for it. The stream holds at most four times
+`max_workers` pairs that are started but not yet yielded; past that, it waits
+for the earliest one. Consumed results are not kept by the stream. Use the context manager when breaking early: it cancels queued
 work and waits for requests already in flight. With `errors="raise"`, iteration
 raises the original exception and stops scheduling more work. With
 `errors="return"`, failures carry their input pair and original exception.
@@ -326,7 +328,9 @@ The returned [`Batch`][datamermaid.batch.Batch] holds results in input order.
 Iteration, indexing, slicing, `results()`, and `to_df()` read completed results
 without making additional requests. Pass a subset of areas to preview a batch.
 
-`max_workers` is how many requests are in flight at once, eight by default. The
+`max_workers` is how many requests are in flight at once, eight by default. A
+new request starts as soon as any request finishes, so one slow or retrying
+request does not leave the other workers idle. The
 options are checked before anything runs, so a misspelled statistic or an empty
 URL fails at the call, not on a worker thread.
 

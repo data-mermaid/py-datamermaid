@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import closing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
@@ -19,6 +18,8 @@ __all__ = ["Batch", "BatchFailure", "BatchStream"]
 I = TypeVar("I")  # noqa: E741
 T = TypeVar("T", covariant=True)
 DEFAULT_MAX_WORKERS = 8
+#: How many inputs per worker a stream may start ahead of the next result it yields.
+READAHEAD = 4
 
 
 @dataclass(frozen=True)
@@ -38,48 +39,71 @@ def _validate_execution(max_workers: int, errors: str) -> None:
 
 
 def _execute(
-    inputs: Iterable[I], compute: Callable[[I], T], max_workers: int
-) -> Generator[_Outcome[I, T], None, None]:
-    """Yield task outcomes in input order, retaining at most max_workers futures.
+    inputs: Iterable[I],
+    compute: Callable[[I], T],
+    max_workers: int,
+    *,
+    ordered: bool,
+) -> Generator[tuple[int, _Outcome[I, T]], None, None]:
+    """Yield ``(position, outcome)`` pairs, keeping ``max_workers`` computations running.
 
-    Error policy belongs to the consumer. Closing stops input consumption,
-    cancels queued work, and waits for computations already in flight.
+    A new input is started as soon as any computation finishes, so one slow
+    input does not leave the other workers idle.  Unordered, outcomes come in
+    completion order.  Ordered, they come in input order, and at most
+    ``READAHEAD * max_workers`` inputs are started but not yet yielded; only a
+    computation slower than that many others makes the workers wait for it.
+
+    Error policy belongs to the consumer. Closing stops input consumption and
+    waits for computations already in flight.
     """
-    iterator = iter(inputs)
+    iterator = enumerate(inputs)
+    capacity = max_workers * READAHEAD if ordered else max_workers
     pool = ThreadPoolExecutor(max_workers=max_workers)
-    pending: deque[tuple[I, Future[T]]] = deque()
+    running: dict[Future[T], tuple[int, I]] = {}
+    finished: dict[int, _Outcome[I, T]] = {}
+    next_position = 0
+    exhausted = False
     try:
-        for _ in range(max_workers):
-            try:
-                item = next(iterator)
-            except StopIteration:
-                break
-            pending.append((item, pool.submit(compute, item)))
-        while pending:
-            item, future = pending.popleft()
-            try:
-                outcome = _Outcome(item, value=future.result())
-            except Exception as exc:
-                outcome = _Outcome(item, error=exc)
-            yield outcome
-            try:
-                item = next(iterator)
-            except StopIteration:
-                continue
-            pending.append((item, pool.submit(compute, item)))
+        while True:
+            while next_position in finished:
+                yield next_position, finished.pop(next_position)
+                next_position += 1
+            while (
+                not exhausted
+                and len(running) < max_workers
+                and len(running) + len(finished) < capacity
+            ):
+                try:
+                    position, item = next(iterator)
+                except StopIteration:
+                    exhausted = True
+                    break
+                running[pool.submit(compute, item)] = (position, item)
+            if not running:
+                return
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in done:
+                position, item = running.pop(future)
+                try:
+                    outcome = _Outcome(item, value=future.result())
+                except Exception as exc:
+                    outcome = _Outcome(item, error=exc)
+                if ordered:
+                    finished[position] = outcome
+                else:
+                    yield position, outcome
     finally:
-        for _, future in pending:
-            future.cancel()
         pool.shutdown(wait=True, cancel_futures=True)
 
 
 class Batch(Generic[I, T]):
     """Compute all inputs and store results in input order.
 
-    Construction waits for every computation to finish. At most ``max_workers``
-    computations are pending at once; inputs are consumed as capacity becomes
-    available. ``compute`` must be thread-safe. Completed inputs and results are
-    retained, and reading the completed batch never starts more work.
+    Construction waits for every computation to finish. ``max_workers``
+    computations run at once, and a new input is consumed as soon as any of
+    them finishes, whatever its position. ``compute`` must be thread-safe.
+    Completed inputs and results are retained, and reading the completed batch
+    never starts more work.
 
     With ``errors="raise"`` (the default), construction raises the first failed
     input's exception after all inputs finish. With ``errors="return"``, BatchFailure objects
@@ -149,13 +173,14 @@ class Batch(Generic[I, T]):
         self._label = label
         self._error_context = error_context
 
-        with closing(_execute(inputs, compute, max_workers)) as outcomes:
-            for outcome in outcomes:
-                self._inputs.append(outcome.item)
-                if outcome.error is not None:
-                    self._results.append(cast("T", BatchFailure(outcome.item, outcome.error)))
-                else:
-                    self._results.append(cast("T", outcome.value))
+        with closing(_execute(inputs, compute, max_workers, ordered=False)) as outcomes:
+            completed = sorted(outcomes, key=lambda pair: pair[0])
+        for _, outcome in completed:
+            self._inputs.append(outcome.item)
+            if outcome.error is not None:
+                self._results.append(cast("T", BatchFailure(outcome.item, outcome.error)))
+            else:
+                self._results.append(cast("T", outcome.value))
         if errors == "raise":
             for result in self._results:
                 if isinstance(result, BatchFailure):
@@ -218,9 +243,13 @@ class BatchFailure(Exception, Generic[I]):
 
 
 class BatchStream(Generic[I, T]):
-    """Single-pass, input-ordered results with at most max_workers pending inputs.
+    """Single-pass, input-ordered results with bounded memory.
 
-    Work starts on iteration. Use as a context manager when stopping early;
+    Work starts on iteration. ``max_workers`` computations run at once, and a
+    new input starts whenever one finishes. Results that finish ahead of an
+    earlier input wait for it, up to ``READAHEAD * max_workers`` inputs in
+    total; past that, the stream waits for the earlier input before it starts
+    more. Use as a context manager when stopping early;
     closing cancels queued work and waits for requests already in flight.
     Results are not retained. Keep the owning client open while consuming.
     """
@@ -270,8 +299,8 @@ class BatchStream(Generic[I, T]):
     def _run(
         inputs: Iterable[I], compute: Callable[[I], T], max_workers: int, errors: str
     ) -> Generator[T, None, None]:
-        with closing(_execute(inputs, compute, max_workers)) as outcomes:
-            for outcome in outcomes:
+        with closing(_execute(inputs, compute, max_workers, ordered=True)) as outcomes:
+            for _, outcome in outcomes:
                 if outcome.error is not None:
                     if errors == "raise":
                         raise outcome.error

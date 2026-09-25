@@ -1,7 +1,7 @@
 """`client.covariates`: the STAC catalog, its searches, and zonal stats over its datasets.
 
-pystac-client reads the catalog with ``requests``, so ``requests_mock`` stands in
-for it; the Zonal Stats service is reached with ``httpx`` and mocked with respx.
+pystac-client reads the catalog through the client's own ``httpx`` transport,
+so respx stands in for the catalog and the Zonal Stats service alike.
 """
 
 from __future__ import annotations
@@ -15,7 +15,15 @@ import respx
 from pystac_client import ItemSearch
 from pystac_client.exceptions import APIError
 
-from datamermaid import CovariateCollection, MermaidClient, ZonalSource
+from datamermaid import (
+    CovariateCollection,
+    MermaidClient,
+    MermaidConnectionError,
+    MermaidError,
+    NotFoundError,
+    ServerError,
+    ZonalSource,
+)
 from datamermaid.client import DEFAULT_COVARIATES_URL
 from datamermaid.resources.zonal_job import resolve_sources
 
@@ -167,22 +175,31 @@ def features(*items, matched=None):
 
 
 @pytest.fixture
-def stac(requests_mock):
-    """The catalog's landing page and collection list."""
+def stac():
+    """The catalog's landing page and collection list, and a router for the rest."""
 
-    requests_mock.get(COVARIATES_URL, json=LANDING)
-    requests_mock.get(COLLECTIONS_URL, json={"collections": [SST, BAA, GRAVITY], "links": []})
-    for entry in (SST, BAA, GRAVITY, LULC):
-        requests_mock.get(f"{COLLECTIONS_URL}/{entry['id']}", json=entry)
-    return requests_mock
+    with respx.mock(assert_all_called=False) as router:
+        router.get(COVARIATES_URL).respond(json=LANDING)
+        router.get(COLLECTIONS_URL).respond(json={"collections": [SST, BAA, GRAVITY], "links": []})
+        for entry in (SST, BAA, GRAVITY, LULC):
+            router.get(f"{COLLECTIONS_URL}/{entry['id']}").respond(json=entry)
+        yield router
 
 
 def mock_search(stac, *responses):
-    return stac.post(SEARCH_URL, [{"json": body} for body in responses])
+    """Answer searches with ``responses`` in turn, repeating the last one."""
+
+    remaining = list(responses)
+
+    def answer(request):
+        body = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        return httpx.Response(200, json=body)
+
+    return stac.post(SEARCH_URL).mock(side_effect=answer)
 
 
 def search_bodies(route):
-    return [call.json() for call in route.request_history]
+    return [json.loads(call.request.content) for call in route.calls]
 
 
 def zonal_ok(key="band_1"):
@@ -216,12 +233,12 @@ def test_collections_are_fetched_once_and_carry_no_credentials(client, stac):
 
     assert [c.id for c in first] == ["daily_sst", "daily_baa", "market_gravity"]
     assert [c.id for c in second] == ["daily_sst", "daily_baa", "market_gravity"]
-    listing = [call for call in stac.request_history if call.url == COLLECTIONS_URL]
+    listing = [call for call in stac.calls if str(call.request.url) == COLLECTIONS_URL]
     assert len(listing) == 1
-    assert all("authorization" not in call.headers for call in stac.request_history)
+    assert all("authorization" not in call.request.headers for call in stac.calls)
 
     client.covariates.collections(refresh=True)
-    assert sum(call.url == COLLECTIONS_URL for call in stac.request_history) == 2
+    assert sum(str(call.request.url) == COLLECTIONS_URL for call in stac.calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -244,9 +261,9 @@ def test_search_collections_needs_a_query(client):
 
 
 def test_collection_uses_the_cached_list_then_the_api(client, stac):
-    single = stac.get(f"{COLLECTIONS_URL}/lulc", json=LULC)
-    cached = stac.get(f"{COLLECTIONS_URL}/daily_sst", json=SST)
-    stac.get(f"{COLLECTIONS_URL}/nope", status_code=404, json={"detail": "not found"})
+    single = stac.get(f"{COLLECTIONS_URL}/lulc").respond(json=LULC)
+    cached = stac.get(f"{COLLECTIONS_URL}/daily_sst").respond(json=SST)
+    stac.get(f"{COLLECTIONS_URL}/nope").respond(404, json={"detail": "not found"})
 
     client.covariates.collections()
     assert client.covariates.collection("daily_sst").title == SST["title"]
@@ -254,8 +271,9 @@ def test_collection_uses_the_cached_list_then_the_api(client, stac):
     assert not single.called
     assert client.covariates.collection("lulc").id == "lulc"
     assert single.call_count == 1
-    with pytest.raises(APIError):
+    with pytest.raises(NotFoundError) as raised:
         client.covariates.collection("nope")
+    assert isinstance(raised.value, APIError)  # pystac-client code still recognises it
 
 
 def test_to_df_lists_every_dataset(client, stac):
@@ -351,10 +369,9 @@ def test_search_is_a_pystac_item_search(client, stac):
 # -- zonal stats ---------------------------------------------------------------
 
 
-@respx.mock
 def test_a_search_plugs_into_zonal_stats_and_picks_the_data_asset(client, stac):
     mock_search(stac, features(sst_item(1)))
-    zonal = respx.post(RASTER_URL).mock(return_value=zonal_ok())
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
 
     search = client.covariates.search("daily_sst", datetime="2026-05-01")
     results = client.zonal_stats.raster.batch([(178.4, -18.1)], search=search).results()
@@ -372,10 +389,9 @@ def test_resolve_sources_passes_zonal_sources_through():
     )
 
 
-@respx.mock
 def test_raster_zonal_stats(client, stac):
     route = mock_search(stac, features(sst_item(1), sst_item(2)))
-    zonal = respx.post(RASTER_URL).mock(return_value=zonal_ok())
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
     sst = client.covariates.collection("daily_sst")
 
     batch = sst.zonal_stats(
@@ -396,10 +412,9 @@ def test_raster_zonal_stats(client, stac):
     ]
 
 
-@respx.mock
 def test_vector_zonal_stats_fills_columns_and_geometry_column(client, stac):
     mock_search(stac, features(GRAVITY_ITEM))
-    zonal = respx.post(VECTOR_URL).mock(return_value=zonal_ok("grav_NC"))
+    zonal = stac.post(VECTOR_URL).mock(return_value=zonal_ok("grav_NC"))
     gravity = client.covariates.collection("market_gravity")
 
     result = gravity.zonal_stats([(178.4, -18.1)], radius=5000).results()[0]
@@ -411,10 +426,9 @@ def test_vector_zonal_stats_fills_columns_and_geometry_column(client, stac):
     assert result["grav_NC"]["mean"] == 28.1
 
 
-@respx.mock
 def test_vector_zonal_stats_respects_explicit_columns(client, stac):
     mock_search(stac, features(GRAVITY_ITEM))
-    zonal = respx.post(VECTOR_URL).mock(return_value=zonal_ok("name"))
+    zonal = stac.post(VECTOR_URL).mock(return_value=zonal_ok("name"))
     gravity = client.covariates.collection("market_gravity")
 
     gravity.zonal_stats(
@@ -426,10 +440,9 @@ def test_vector_zonal_stats_respects_explicit_columns(client, stac):
     assert body["geometry_column"] == "other"
 
 
-@respx.mock
 def test_prepare_zonal_stats_counts_without_computing(client, stac):
     mock_search(stac, features(sst_item(1), sst_item(2), sst_item(3)))
-    zonal = respx.post(RASTER_URL).mock(return_value=zonal_ok())
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
     sst = client.covariates.collection("daily_sst")
 
     job = sst.prepare_zonal_stats([(178.4, -18.1), (178.5, -18.1)], datetime="2026-05")
@@ -464,3 +477,91 @@ def test_collection_wraps_a_pystac_collection(client, stac):
     assert isinstance(sst, CovariateCollection)
     assert sst.stac.id == "daily_sst"
     assert repr(sst).startswith("CovariateCollection(id='daily_sst'")
+
+
+# -- catalog requests go through the client ------------------------------------
+
+
+def test_catalog_requests_retry_through_the_client(client, stac):
+    listing = stac.get(COLLECTIONS_URL).mock(
+        side_effect=[
+            httpx.Response(503),
+            httpx.Response(200, json={"collections": [SST], "links": []}),
+        ]
+    )
+
+    assert [c.id for c in client.covariates.collections()] == ["daily_sst"]
+    assert listing.call_count == 2
+
+
+def test_catalog_failures_are_mermaid_errors(client, stac):
+    stac.get(COLLECTIONS_URL).respond(500)
+    with pytest.raises(ServerError):
+        client.covariates.collections()
+
+    stac.get(COLLECTIONS_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
+    with pytest.raises(MermaidConnectionError):
+        client.covariates.collections()
+
+
+def test_catalog_requests_carry_the_client_timeout(stac):
+    stac.get(COLLECTIONS_URL).respond(json={"collections": [], "links": []})
+    with MermaidClient(timeout=4.0) as client:
+        client.covariates.collections()
+    timeouts = [call.request.extensions["timeout"] for call in stac.calls]
+    assert timeouts and all(timeout["read"] == 4.0 for timeout in timeouts)
+
+
+def test_a_catalog_404_is_the_api_error_pystac_client_expects(client, stac):
+    # CollectionClient.get_item returns None on an APIError with status 404.
+    url = f"{COLLECTIONS_URL}/daily_sst/items/nope"
+    stac.get(url).respond(404)
+
+    with pytest.raises(APIError) as raised:
+        client.covariates.catalog._stac_io.read_json(url)
+    assert raised.value.status_code == 404
+    assert isinstance(raised.value, MermaidError)
+
+
+# -- the request limit -----------------------------------------------------------
+
+
+def test_zonal_stats_refuses_a_job_over_max_requests(client, stac):
+    route = mock_search(stac, features(sst_item(1), sst_item(2), sst_item(3)))
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    # Two AOIs within four requests allow two items, so the search stops at three.
+    with pytest.raises(ValueError, match=r"at least 3 items .* max_requests=4"):
+        sst.zonal_stats([(178.4, -18.1), (178.5, -18.1)], max_requests=4)
+
+    assert zonal.call_count == 0
+    assert route.call_count == 1
+
+
+def test_zonal_stats_runs_within_max_requests(client, stac):
+    mock_search(stac, features(sst_item(1), sst_item(2)))
+    zonal = stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    batch = sst.zonal_stats([(178.4, -18.1), (178.5, -18.1)], max_requests=4)
+
+    assert len(batch) == 4
+    assert zonal.call_count == 4
+
+
+def test_max_requests_none_removes_the_limit(client, stac):
+    mock_search(stac, features(sst_item(1), sst_item(2)))
+    stac.post(RASTER_URL).mock(return_value=zonal_ok())
+    sst = client.covariates.collection("daily_sst")
+
+    assert len(sst.zonal_stats([(178.4, -18.1)], max_requests=None)) == 2
+    with pytest.raises(ValueError, match="max_requests"):
+        sst.zonal_stats([(178.4, -18.1)], max_requests=1)
+
+
+@pytest.mark.parametrize(("value", "error"), [(0, ValueError), (True, TypeError), (2.5, TypeError)])
+def test_max_requests_is_validated(client, stac, value, error):
+    sst = client.covariates.collection("daily_sst")
+    with pytest.raises(error, match="max_requests"):
+        sst.zonal_stats([(178.4, -18.1)], max_requests=value)

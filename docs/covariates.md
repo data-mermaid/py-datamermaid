@@ -24,6 +24,12 @@ Datasets wrap `pystac.Collection` objects and searches are pystac-client
 `ItemSearch` objects, so the pystac documentation applies to them too.
 `client.covariates.catalog` is the pystac-client `Client` itself.
 
+pystac-client sends its requests through the `MermaidClient`, so catalog
+requests use the client's `timeout`, `max_retries` and `429` throttle. A failed
+catalog request raises the same
+[`MermaidError`][datamermaid.exceptions.MermaidError] subclasses as the rest of
+the SDK.
+
 ## See what is available
 
 `collections()` returns every dataset in the catalog. The client fetches the
@@ -58,7 +64,7 @@ client.covariates.to_df("fishing")  # the same filter, as a table
 ```
 
 If you know the id, `collection()` returns that dataset. An unknown id raises
-`pystac_client.exceptions.APIError`:
+[`NotFoundError`][datamermaid.exceptions.NotFoundError]:
 
 ```python
 sst = client.covariates.collection("daily_sst")
@@ -142,8 +148,16 @@ the collection covers.
 ### Check the size of a job first
 
 A daily dataset over a long period gives many requests: 100 sites over 365 days
-is 36,500. `prepare_zonal_stats()` takes the same arguments, fetches the items,
-and sends no statistics requests:
+is 36,500. `zonal_stats()` sends at most `max_requests` requests, 10,000 by
+default. If the areas of interest times the matching items is more than that, it
+raises `ValueError` before it sends any statistics requests. The item search also
+stops as soon as the limit is certain to be passed, so leaving out `datetime` on
+a daily dataset costs few catalog requests. Narrow the search, or pass a larger
+`max_requests`. `max_requests=None` removes the limit.
+
+`prepare_zonal_stats()` takes the same arguments, fetches the items, and sends
+no statistics requests. It has no limit, so use it to see the count of a large
+job before you run it:
 
 ```python
 job = sst.prepare_zonal_stats(sites, datetime=("2025-01-01", "2025-12-31"), stats=["mean"])

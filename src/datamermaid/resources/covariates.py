@@ -11,8 +11,11 @@ installed by the ``covariates`` extra (``pip install 'datamermaid[covariates]'``
 Collections wrap a ``pystac.Collection`` and searches are plain pystac-client
 ``ItemSearch`` objects, so everything pystac offers is still there.  The catalog
 is a public host, resolved independently of the client's ``base_url`` (see
-[`MermaidClient`][datamermaid.client.MermaidClient]'s ``covariates_url``), and
-pystac-client never sees the client's MERMAID credentials.
+[`MermaidClient`][datamermaid.client.MermaidClient]'s ``covariates_url``).
+pystac-client sends its requests through the client, so they use the client's
+timeout, retries and throttle, raise
+[`MermaidError`][datamermaid.exceptions.MermaidError] subclasses, and carry no
+MERMAID credentials.
 
 See what is available:
 
@@ -50,6 +53,7 @@ from ..models import ZonalStatsResult
 from ..pagination import to_dataframe
 from .base import BaseResource
 from .zonal_job import ZonalJob, ZonalSource, ZonalTask, default_asset, source_from_item
+from .zonal_stats import _expand_aois
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import datetime as dt
@@ -63,6 +67,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from .zonal_stats import Stat
 
 __all__ = ["CovariateCollection", "Covariates"]
+
+#: Most statistics requests ``CovariateCollection.zonal_stats`` sends unless told otherwise.
+DEFAULT_MAX_REQUESTS = 10_000
 
 PYSTAC_INSTALL_HINT = (
     "client.covariates needs pystac-client; install it with `pip install 'datamermaid[covariates]'`"
@@ -426,6 +433,7 @@ class CovariateCollection:
         cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stream: Literal[False] = False,
+        max_requests: int | None = DEFAULT_MAX_REQUESTS,
         **options: Any,
     ) -> Batch[ZonalTask, ZonalStatsResult]: ...
 
@@ -447,6 +455,7 @@ class CovariateCollection:
         cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise"] = "raise",
         stream: Literal[True],
+        max_requests: int | None = DEFAULT_MAX_REQUESTS,
         **options: Any,
     ) -> BatchStream[ZonalTask, ZonalStatsResult]: ...
 
@@ -468,6 +477,7 @@ class CovariateCollection:
         cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stream: Literal[False] = False,
+        max_requests: int | None = DEFAULT_MAX_REQUESTS,
         **options: Any,
     ) -> Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
 
@@ -489,6 +499,7 @@ class CovariateCollection:
         cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stream: Literal[True],
+        max_requests: int | None = DEFAULT_MAX_REQUESTS,
         **options: Any,
     ) -> BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]: ...
 
@@ -509,6 +520,7 @@ class CovariateCollection:
         cache: MutableMapping[str, Any] | bool | None = True,
         errors: Literal["raise", "return"] = "raise",
         stream: bool = False,
+        max_requests: int | None = DEFAULT_MAX_REQUESTS,
         **options: Any,
     ) -> (
         Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
@@ -541,14 +553,30 @@ class CovariateCollection:
             cache: Response cache, as for the zonal stats ``batch`` methods.
             errors: ``"return"`` keeps failures as ``BatchFailure`` results.
             stream: ``True`` returns a ``BatchStream`` with bounded memory.
+            max_requests: Refuse to start when the AOIs times the matching
+                items exceed this many requests; ``None`` removes the limit.
+                The item search stops once the limit is certain to be passed,
+                so an unbounded search costs few catalog requests.  Use
+                [`prepare_zonal_stats`][..prepare_zonal_stats] to see the count
+                first.
             **options: Other route options, e.g. ``bands`` and ``approx_stats``
                 for rasters or ``weighting_method`` for vectors.
 
         Raises:
             ValueError: If no item matches, the asset is neither GeoTIFF nor
-                GeoParquet, or a vector dataset has no numeric column to default to.
+                GeoParquet, a vector dataset has no numeric column to default
+                to, or the job would send more than ``max_requests`` requests.
         """
 
+        aois = _expand_aois(aois)
+        if max_requests is not None:
+            if isinstance(max_requests, bool) or not isinstance(max_requests, int):
+                raise TypeError("max_requests must be an integer or None")
+            if max_requests < 1:
+                raise ValueError("max_requests must be >= 1")
+            # One item past what the limit allows is enough to know it is passed.
+            cap = max_requests // max(len(aois), 1) + 1
+            max_items = cap if max_items is None else min(max_items, cap)
         endpoint, sources, options = self._zonal_plan(
             datetime=datetime,
             bbox=bbox,
@@ -558,6 +586,14 @@ class CovariateCollection:
             columns=columns,
             options=options,
         )
+        if max_requests is not None and len(aois) * len(sources) > max_requests:
+            raise ValueError(
+                f"{len(aois)} AOI{'s' if len(aois) != 1 else ''} against "
+                f"{'at least ' if len(sources) == max_items else ''}"
+                f"{len(sources)} items of {self.id!r} is more than max_requests={max_requests} "
+                "requests; narrow datetime=, bbox= or ids=, set max_items=, or raise "
+                "max_requests= (prepare_zonal_stats shows the count without sending any)"
+            )
         result: (
             Batch[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
             | BatchStream[ZonalTask, ZonalStatsResult | BatchFailure[ZonalTask]]
@@ -593,9 +629,17 @@ class Covariates(BaseResource):
 
     @cached_property
     def catalog(self) -> Client:
-        """The pystac-client ``Client`` for the catalog, opened on first use."""
+        """The pystac-client ``Client`` for the catalog, opened on first use.
 
-        catalog: Client = _require_pystac_client().Client.open(self.path)
+        Its requests go through the owning client, so they share its timeout,
+        retries and ``429`` throttle, and failures raise
+        [`MermaidError`][datamermaid.exceptions.MermaidError] subclasses.
+        """
+
+        pystac_client = _require_pystac_client()
+        from ._stac_io import ClientStacIO
+
+        catalog: Client = pystac_client.Client.open(self.path, stac_io=ClientStacIO(self._client))
         return catalog
 
     def collections(self, *, refresh: bool = False) -> list[CovariateCollection]:
@@ -613,7 +657,7 @@ class Covariates(BaseResource):
         """One dataset by its exact id, e.g. ``"daily_sst"``.
 
         Raises:
-            pystac_client.exceptions.APIError: If the catalog has no such collection.
+            NotFoundError: If the catalog has no such collection.
         """
 
         with self._lock:

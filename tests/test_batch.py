@@ -9,7 +9,7 @@ import pytest
 
 import datamermaid
 from datamermaid import Batch
-from datamermaid.batch import DEFAULT_MAX_WORKERS
+from datamermaid.batch import DEFAULT_MAX_WORKERS, READAHEAD
 
 TIMEOUT = 5.0
 
@@ -238,8 +238,8 @@ def test_consumes_inputs_only_as_execution_capacity_becomes_available(stream):
 
     def inputs():
         for index in range(len(completed)):
-            if index >= 3:
-                assert completed[index - 3].is_set(), "inputs consumed ahead of worker capacity"
+            done = sum(event.is_set() for event in completed)
+            assert index - done < 3, "inputs consumed ahead of worker capacity"
             yield index
 
     def compute(index):
@@ -248,6 +248,48 @@ def test_consumes_inputs_only_as_execution_capacity_becomes_available(stream):
 
     factory = datamermaid.BatchStream if stream else Batch
     assert list(factory(inputs(), compute, max_workers=3)) == list(range(20))
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_a_slow_input_does_not_leave_the_other_workers_idle(stream):
+    """The first input finishes only after later ones have run beside it."""
+    later_done = threading.Event()
+
+    def compute(index):
+        if index == 0:
+            assert later_done.wait(TIMEOUT), "workers waited on the slow input"
+        elif index == 5:
+            later_done.set()
+        return index
+
+    factory = datamermaid.BatchStream if stream else Batch
+    assert list(factory(range(8), compute, max_workers=2)) == list(range(8))
+
+
+def test_stream_bounds_how_far_it_reads_ahead_of_a_slow_input():
+    release = threading.Event()
+    consumed = []
+
+    def inputs():
+        for index in range(100):
+            consumed.append(index)
+            yield index
+
+    def compute(index):
+        if index == 0:
+            assert release.wait(TIMEOUT)
+        return index
+
+    with datamermaid.BatchStream(inputs(), compute, max_workers=2) as results:
+        first = threading.Thread(target=lambda: next(results))
+        first.start()
+        deadline = time.monotonic() + TIMEOUT
+        while len(consumed) < 2 * READAHEAD and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.05)
+        assert len(consumed) == 2 * READAHEAD
+        release.set()
+        first.join(TIMEOUT)
 
 
 @pytest.mark.parametrize("stream", [False, True])
