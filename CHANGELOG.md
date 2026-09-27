@@ -9,6 +9,9 @@ change behavior.
 
 ### Added
 
+- `ZonalStatsResult.__geo_interface__`, a GeoJSON Feature with `aoi` as the
+  geometry and the `to_dict()` row as the properties, so
+  `geopandas.GeoDataFrame.from_features(results)` works on a list of results.
 - `BatchFailure.to_dict()`. Its row has the same `label`, `source` and
   `stac_<field>` columns as a successful result's row, plus `error` and
   `error_type`, so streamed success and failure rows share one layout.

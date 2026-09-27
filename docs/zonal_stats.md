@@ -40,6 +40,11 @@ area of interest and the source URL it was computed from:
 | `result.aoi` | the GeoJSON geometry that was sent |
 | `result.source` | the URL the statistics came from |
 | `result.label` | whatever identifier you attached, `None` if you attached none |
+| `result.__geo_interface__` | a GeoJSON Feature with `aoi` as the geometry and `to_dict()` as the properties |
+
+Because of `__geo_interface__`, geopandas reads a list of results directly:
+`geopandas.GeoDataFrame.from_features(results)`. A buffered Point comes back as
+the bare point, since GeoJSON has no radius.
 
 Calling the endpoint is the same as calling its `stats` method, so
 `client.zonal_stats.raster(aoi, url=...)` works too.

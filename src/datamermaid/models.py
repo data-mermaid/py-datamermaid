@@ -1137,6 +1137,19 @@ class ZonalStatsResult:
 
     # -- export -------------------------------------------------------------
 
+    @property
+    def __geo_interface__(self) -> dict[str, Any]:
+        """A GeoJSON Feature of [`aoi`][..aoi] with the [`to_dict`][..to_dict] row as properties.
+
+        This lets shapely, geopandas and the like read a result directly, so
+        ``geopandas.GeoDataFrame.from_features(results)`` gives one row per
+        result with its area of interest as the geometry.  A buffered Point
+        keeps its ``radius`` member, which GeoJSON readers ignore, so they see
+        the bare point.
+        """
+
+        return {"type": "Feature", "geometry": dict(self.aoi), "properties": self.to_dict()}
+
     def to_dict(self) -> dict[str, Any]:
         """Flatten into one wide row: ``label``, ``source``, then ``<band>_<stat>``.
 

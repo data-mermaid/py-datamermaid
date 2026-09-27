@@ -843,6 +843,17 @@ def test_to_records_is_long():
     ]
 
 
+def test_geo_interface_is_a_feature_of_the_aoi_and_the_row():
+    result = ZonalStatsResult.from_api(
+        {"band_1": {"mean": 12.3}}, aoi=POINT, source=COG, label="site-1"
+    )
+    assert result.__geo_interface__ == {
+        "type": "Feature",
+        "geometry": POINT,
+        "properties": {"label": "site-1", "source": COG, "band_1_mean": 12.3},
+    }
+
+
 def test_result_is_frozen():
     result = ZonalStatsResult.from_api(zonal_payload("raster"), aoi=POINT, source=COG)
     with pytest.raises(AttributeError):
