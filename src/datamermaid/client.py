@@ -45,13 +45,11 @@ __all__ = [
     "DEFAULT_BASE_URL",
     "DEFAULT_COVARIATES_URL",
     "DEFAULT_ZONAL_STATS_URL",
-    "DEV_BASE_URL",
     "ZONAL_STATS_URL_ENV_VAR",
     "MermaidClient",
 ]
 
 DEFAULT_BASE_URL = "https://api.datamermaid.org/v1/"
-DEV_BASE_URL = "https://dev-api.datamermaid.org/v1/"
 BASE_URL_ENV_VAR = "MERMAID_API_URL"
 
 DEFAULT_ZONAL_STATS_URL = "https://api.zonalstats.datamermaid.org/api/v1/zonal-stats/"

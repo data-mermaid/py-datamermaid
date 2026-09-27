@@ -50,7 +50,6 @@ from .client import (
     DEFAULT_BASE_URL,
     DEFAULT_COVARIATES_URL,
     DEFAULT_ZONAL_STATS_URL,
-    DEV_BASE_URL,
     ZONAL_STATS_URL_ENV_VAR,
     MermaidClient,
 )
@@ -143,7 +142,6 @@ __all__ = [
     "DEFAULT_BASE_URL",
     "DEFAULT_COVARIATES_URL",
     "DEFAULT_ZONAL_STATS_URL",
-    "DEV_BASE_URL",
     "ZONAL_STATS_ENDPOINTS",
     "ZONAL_STATS_URL_ENV_VAR",
     "APIKeyAuth",

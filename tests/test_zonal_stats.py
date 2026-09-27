@@ -107,7 +107,7 @@ def test_zonal_stats_url_gets_a_trailing_slash():
 
 
 def test_zonal_stats_url_is_independent_of_the_base_url():
-    with MermaidClient(base_url="https://dev-api.datamermaid.org/v1") as client:
+    with MermaidClient(base_url="https://api.example.test/v1") as client:
         assert client.zonal_stats_url == DEFAULT_ZONAL_STATS_URL
 
 

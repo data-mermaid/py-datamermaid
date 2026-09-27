@@ -7,7 +7,7 @@ import pytest
 import respx
 
 from datamermaid import DEFAULT_BASE_URL, MermaidClient
-from datamermaid.client import DEV_BASE_URL, default_user_agent, resolve_base_url
+from datamermaid.client import default_user_agent, resolve_base_url
 
 from .conftest import BASE_URL
 
@@ -17,12 +17,12 @@ def test_default_base_url():
 
 
 def test_base_url_from_environment(monkeypatch):
-    monkeypatch.setenv("MERMAID_API_URL", DEV_BASE_URL)
-    assert MermaidClient().base_url == DEV_BASE_URL
+    monkeypatch.setenv("MERMAID_API_URL", "https://env.example.test/v1/")
+    assert MermaidClient().base_url == "https://env.example.test/v1/"
 
 
 def test_explicit_base_url_wins_over_environment(monkeypatch):
-    monkeypatch.setenv("MERMAID_API_URL", DEV_BASE_URL)
+    monkeypatch.setenv("MERMAID_API_URL", "https://env.example.test/v1/")
     assert MermaidClient(base_url="https://example.test/v1/").base_url == "https://example.test/v1/"
 
 

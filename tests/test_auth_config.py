@@ -18,23 +18,23 @@ def test_defaults_point_at_the_production_tenant():
 
 
 def test_endpoints_are_derived_from_the_domain():
-    config = Auth0Config.resolve(domain="dev.auth0.com")
-    assert config.authorize_url == "https://dev.auth0.com/authorize"
-    assert config.token_url == "https://dev.auth0.com/oauth/token"
-    assert config.device_code_url == "https://dev.auth0.com/oauth/device/code"
-    assert config.issuer == "https://dev.auth0.com/"
+    config = Auth0Config.resolve(domain="tenant.example.test")
+    assert config.authorize_url == "https://tenant.example.test/authorize"
+    assert config.token_url == "https://tenant.example.test/oauth/token"
+    assert config.device_code_url == "https://tenant.example.test/oauth/device/code"
+    assert config.issuer == "https://tenant.example.test/"
 
 
 def test_environment_overrides_the_defaults(monkeypatch):
-    monkeypatch.setenv("MERMAID_AUTH0_DOMAIN", "dev.auth0.com")
+    monkeypatch.setenv("MERMAID_AUTH0_DOMAIN", "tenant.example.test")
     monkeypatch.setenv("MERMAID_CLIENT_ID", "env-client")
-    monkeypatch.setenv("MERMAID_AUDIENCE", "https://dev-api.datamermaid.org")
+    monkeypatch.setenv("MERMAID_AUDIENCE", "https://api.example.test")
 
     config = Auth0Config.resolve()
     assert (config.domain, config.client_id, config.audience) == (
-        "dev.auth0.com",
+        "tenant.example.test",
         "env-client",
-        "https://dev-api.datamermaid.org",
+        "https://api.example.test",
     )
 
 
@@ -71,6 +71,6 @@ def test_offline_access_is_dropped_for_grants_that_reject_it():
 
 def test_cache_key_separates_tenants_and_audiences():
     production = Auth0Config.resolve().cache_key
-    development = Auth0Config.resolve(domain="dev.auth0.com").cache_key
-    assert production != development
+    other = Auth0Config.resolve(domain="tenant.example.test").cache_key
+    assert production != other
     assert Auth0Config.resolve().cache_key == production

@@ -42,6 +42,11 @@ change behavior.
   An unknown option raises `TypeError` that names the method called and
   suggests the closest option, such as `bands` for `bandz`.
 
+### Removed
+
+- `DEV_BASE_URL`. Pass `base_url` or set `MERMAID_API_URL` to use another
+  instance.
+
 ## [0.2.0] - 2026-09-25
 
 ### Added

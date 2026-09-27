@@ -394,8 +394,7 @@ collections.
 | `timeout` | | `30.0` seconds |
 | `max_retries` | | `3` (429 and 5xx, with exponential backoff honouring `Retry-After` up to 30 s) |
 
-The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
-`datamermaid.DEV_BASE_URL`. The Zonal Stats service is a separate public
+The Zonal Stats service is a separate public
 host, so it has its own setting and is sent no credentials.
 
 ### Errors
@@ -499,8 +498,8 @@ and its address bar holds the code.
 
 Tokens live in `$XDG_CONFIG_HOME/datamermaid/tokens.json` (defaulting to
 `~/.config/datamermaid/tokens.json`), written with mode `0600`. One entry is
-kept per tenant/client/audience, so the production and development tenants can
-be logged in to side by side. Expiry is read from the access token's `exp`
+kept per tenant/client/audience, so logins to more than one tenant can be
+kept side by side. Expiry is read from the access token's `exp`
 claim (decoded, never verified locally) with a 60 second margin; an expired
 token is refreshed silently, and only a failed refresh prompts a new login.
 The file is written by rename, so an interrupted save never truncates the

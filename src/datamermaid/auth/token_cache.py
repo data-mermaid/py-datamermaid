@@ -2,8 +2,8 @@
 
 Tokens live in ``$XDG_CONFIG_HOME/datamermaid/tokens.json`` (defaulting to
 ``~/.config``), readable only by the owner.  One file holds one entry per
-tenant/client/audience combination, so the production and development Auth0
-tenants can be logged into side by side.
+tenant/client/audience combination, so logins to more than one Auth0 tenant
+can be kept side by side.
 """
 
 from __future__ import annotations

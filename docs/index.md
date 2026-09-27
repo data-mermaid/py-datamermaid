@@ -131,9 +131,7 @@ with MermaidClient() as client:
 | `timeout` | | `30.0` seconds |
 | `max_retries` | | `3` (429 and 5xx, exponential backoff honouring `Retry-After` up to 30 s) |
 
-The development instance is `https://dev-api.datamermaid.org/v1/`, exported as
-[`datamermaid.DEV_BASE_URL`][datamermaid.client.DEV_BASE_URL]. The
-[Zonal Stats service](zonal_stats.md) is a separate public host, so it has its
+The [Zonal Stats service](zonal_stats.md) is a separate public host, so it has its
 own setting and receives no credentials.
 
 ## Logging

@@ -191,8 +191,8 @@ the `device` flow, which has no redirect at all.
 
 Tokens live in `$XDG_CONFIG_HOME/datamermaid/tokens.json`, defaulting to
 `~/.config/datamermaid/tokens.json`, written with mode `0600`. One entry is kept
-per tenant/client/audience, so the production and development Auth0 tenants can
-be logged in to side by side.
+per tenant/client/audience, so logins to more than one Auth0 tenant can be kept
+side by side.
 
 ```python
 from datamermaid import TokenCache
@@ -258,17 +258,6 @@ The defaults point at MERMAID's production tenant.
 Keyword arguments win over the environment, which wins over the defaults, as
 resolved by [`Auth0Config.resolve()`][datamermaid.auth.config.Auth0Config.resolve].
 `offline_access` is the scope that makes a refresh token available.
-
-Point the whole stack at the development instance:
-
-```python
-import datamermaid
-from datamermaid import DEV_BASE_URL, MermaidClient
-
-auth = datamermaid.login(domain="dev-datamermaid.auth0.com")
-with MermaidClient(auth=auth, base_url=DEV_BASE_URL) as client:
-    print(client.me().full_name)
-```
 
 ## Errors
 
