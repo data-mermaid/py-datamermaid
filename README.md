@@ -556,8 +556,9 @@ document with a directory summary and every included file, scanned for secrets
 before it is written. The output is git-ignored, since it is a generated
 artifact - regenerate it rather than committing it.
 
-On every push to `main` the *Docs* workflow regenerates it and publishes it
-with the documentation site, so agents can fetch the current pack directly:
+When a release tag is pushed, the *Docs* workflow regenerates it and publishes
+it with the documentation site, so agents can fetch the pack for the latest
+release directly:
 
 <https://data-mermaid.github.io/py-datamermaid/repomix-output.xml>
 
@@ -566,7 +567,8 @@ with the documentation site, so agents can fetch the current pack directly:
 The full guides and the generated API reference live at
 <https://data-mermaid.github.io/py-datamermaid/>, built with
 [MkDocs](https://www.mkdocs.org/) from [`docs/`](docs/) and published by the
-*Docs* workflow on every push to `main`. To work on them locally:
+*Docs* workflow when a release tag is pushed, so they always match the latest
+release. To work on them locally:
 
 ```bash
 uv run --group docs mkdocs serve          # live-reloading preview on :8000
